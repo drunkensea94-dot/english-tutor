@@ -1,5 +1,6 @@
-import { LESSONS } from "./lessons.js";
-import { SCENARIOS, demoReply } from "./scenarios.js";
+import { LESSONS, ALL_LESSONS } from "./lessons.js";
+import { SCENARIOS, scenarioFor, demoReply } from "./scenarios.js";
+import { LEVEL_INFO, levelOf } from "./levels.js";
 import { authState, initAuth, onAuthChange, signIn, signOutUser, getIdToken, loadRemoteStats, saveRemoteStats } from "./auth.js";
 
 // ---------- 저장소 (이 기기에만 저장) ----------
@@ -12,8 +13,20 @@ const store = {
   },
 };
 
-const settings = Object.assign({ level: "beginner", autoSpeak: true, showKo: true, rate: 0.9 }, store.get("settings", {}));
+const settings = Object.assign({ level: "beginner", autoSpeak: true, showKo: true, rate: 0.7 }, store.get("settings", {}));
+settings.level = levelOf(settings.level);
 const saveSettings = () => store.set("settings", settings);
+const level = () => LEVEL_INFO[settings.level];
+// 수준을 바꾸면 말하기 속도와 해석 보이기도 그 수준에 맞게 바꿔요. (나중에 직접 바꿀 수 있어요)
+function setLevel(next) {
+  settings.level = levelOf(next);
+  settings.rate = level().rate;
+  settings.showKo = level().showKo;
+  settings.v = 2;
+  saveSettings();
+}
+// 수준별 기본값이 생기기 전에 저장된 설정은 한 번만 맞춰 줘요.
+if (settings.v !== 2) setLevel(settings.level);
 
 const todayKey = () => new Date().toLocaleDateString("sv-SE");
 function recordPractice(kind, score) {
@@ -187,7 +200,17 @@ function render(html) {
   $view.innerHTML = html;
   window.scrollTo(0, 0);
 }
-const LEVEL_NAMES = { beginner: "왕초보", elementary: "초급", intermediate: "중급" };
+function levelPicker() {
+  return `<div class="levels">${Object.entries(LEVEL_INFO).map(([k, v]) => `<button class="chip ${settings.level === k ? "on" : ""}" data-level="${k}">${v.name}</button>`).join("")}</div>`;
+}
+function bindLevelPicker(rerender) {
+  $view.querySelectorAll("[data-level]").forEach((b) => (b.onclick = () => {
+    if (b.dataset.level === settings.level) return;
+    setLevel(b.dataset.level);
+    rerender();
+    toast(`${level().name} 수준으로 바꿨어요`);
+  }));
+}
 
 // ---------- 서버 상태 ----------
 let aiEnabled = false;
@@ -342,8 +365,9 @@ function homeView() {
   render(`
     <div class="stack">
       <section class="card hero">
-        <h2>Hello! 오늘도 한마디 해 볼까요?</h2>
-        <p>듣고, 따라 말하고, AI 친구와 대화하면서 자신감을 키워요.</p>
+        <span class="level-tag">${level().name}</span>
+        <h2>${level().hero}</h2>
+        <p>${level().heroSub}</p>
       </section>
       ${inAppCard()}
       ${installCard()}
@@ -355,19 +379,17 @@ function homeView() {
       </div>
       <button class="card big-choice" data-go="speak">
         <span class="emoji">🎤</span>
-        <span><h3>말하기 연습</h3><p class="small muted">원어민 발음 듣고 따라 말하면 점수를 알려 줘요</p></span>
+        <span><h3>말하기 연습</h3><p class="small muted">${LESSONS[settings.level].map((l) => l.title).slice(0, 3).join(", ")} 등 ${LESSONS[settings.level].length}개 주제</p></span>
       </button>
       <button class="card big-choice" data-go="chat">
         <span class="emoji">💬</span>
-        <span><h3>AI와 대화 연습</h3><p class="small muted">카페, 여행, 자기소개 상황에서 실제처럼 대화해요</p></span>
+        <span><h3>AI와 대화 연습</h3><p class="small muted">${level().chatIntro}</p></span>
       </button>
       ${authState.user ? accountCard() : ""}
       <section class="card stack">
         <h3>내 수준</h3>
-        <div class="levels">
-          ${Object.entries(LEVEL_NAMES).map(([k, v]) => `<button class="chip ${settings.level === k ? "on" : ""}" data-level="${k}">${v}</button>`).join("")}
-        </div>
-        <p class="small muted" style="margin:0">AI가 이 수준에 맞춰 쉬운 단어와 짧은 문장으로 말해요.</p>
+        ${levelPicker()}
+        <p class="small muted" style="margin:0">${level().desc}</p>
       </section>
       ${!canListen ? `<div class="notice">이 브라우저는 음성 인식을 지원하지 않아요. 휴대폰은 <b>크롬(안드로이드)</b>이나 <b>사파리(아이폰)</b>, 컴퓨터는 <b>크롬·엣지</b>를 써 주세요. 대화는 글자로 입력해도 돼요.</div>` : ""}
       ${!serverOnline ? `<div class="notice">서버에 연결되지 않아 체험 모드로 동작해요.</div>` : ""}
@@ -375,11 +397,7 @@ function homeView() {
   $view.querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => go(b.dataset.go)));
   bindAccountCard();
   bindInstallCard();
-  $view.querySelectorAll("[data-level]").forEach((b) => (b.onclick = () => {
-    settings.level = b.dataset.level;
-    saveSettings();
-    homeView();
-  }));
+  bindLevelPicker(homeView);
 }
 
 // ---------- 말하기 연습 ----------
@@ -387,27 +405,32 @@ function speakListView() {
   setTab("speak");
   setHeader("말하기 연습");
   const st = getStats();
+  const lv = level();
   render(`
     <div class="stack">
-      <p class="muted" style="margin:0">주제를 고르세요. 🔊로 듣고 🎤로 따라 말해요.</p>
+      ${levelPicker()}
+      <p class="muted" style="margin:0">${lv.speakIntro}</p>
       <div class="grid">
-        ${LESSONS.map((l) => {
-          const done = l.items.filter((_, i) => (st.best[`${l.id}:${i}`] || 0) >= 80).length;
+        ${LESSONS[settings.level].map((l) => {
+          const done = l.items.filter((_, i) => (st.best[`${l.id}:${i}`] || 0) >= lv.pass).length;
           return `<button class="card tile" data-lesson="${l.id}">
             <span class="emoji">${l.icon}</span>
-            <span class="tag">${l.level}</span>
+            <span class="tag">${l.tag || lv.tag}</span>
             <h3>${l.title}</h3>
             <span class="small muted">${done} / ${l.items.length} 통과</span>
           </button>`;
         }).join("")}
       </div>
+      <p class="small muted" style="margin:0;text-align:center">${lv.pass}점 이상이면 통과예요.</p>
     </div>`);
+  bindLevelPicker(speakListView);
   $view.querySelectorAll("[data-lesson]").forEach((b) => (b.onclick = () => practiceView(b.dataset.lesson, 0)));
 }
 
 function practiceView(lessonId, index) {
-  const lesson = LESSONS.find((l) => l.id === lessonId);
-  const [en, ko] = lesson.items[index];
+  const lesson = ALL_LESSONS.find((l) => l.id === lessonId);
+  const lv = LEVEL_INFO[lesson.level];
+  const [en, ko, note] = lesson.items[index];
   const key = `${lesson.id}:${index}`;
   setTab("speak");
   setHeader(`${lesson.icon} ${lesson.title}`, speakListView);
@@ -416,8 +439,9 @@ function practiceView(lessonId, index) {
       <div class="progress"><i style="width:${((index + 1) / lesson.items.length) * 100}%"></i></div>
       <p class="small muted" style="margin:0;text-align:center">${index + 1} / ${lesson.items.length}</p>
       <section class="card sentence-card">
-        <div class="sentence-en" id="target">${esc(en)}</div>
+        <div class="sentence-en" id="target">${en.split(/\s+/).map((w) => `<button class="word" data-say="${esc(w.replace(/[^A-Za-z']/g, ""))}">${esc(w)}</button>`).join(" ")}</div>
         <div class="sentence-ko">${esc(ko)}</div>
+        ${note ? `<div class="note"><b>${lv.noteIcon} ${lv.noteLabel}</b> ${esc(note)}</div>` : ""}
       </section>
       <div class="row">
         <button class="btn ghost" id="listen">🔊 듣기</button>
@@ -437,6 +461,7 @@ function practiceView(lessonId, index) {
   const $mic = document.getElementById("mic");
   const $label = document.getElementById("micLabel");
   const $result = document.getElementById("result");
+  $view.querySelectorAll("[data-say]").forEach((b) => (b.onclick = () => speak(b.dataset.say, 0.6)));
   document.getElementById("listen").onclick = () => speak(en);
   document.getElementById("slow").onclick = () => speak(en, 0.6);
   document.getElementById("prev").onclick = () => practiceView(lessonId, index - 1);
@@ -472,8 +497,9 @@ function practiceView(lessonId, index) {
   };
 
   function showResult({ score, words, heard }) {
-    const cls = score >= 80 ? "good" : score >= 50 ? "mid" : "low";
-    const msg = score >= 90 ? "완벽해요! 원어민 같아요 🎉" : score >= 80 ? "아주 잘했어요! 👏" : score >= 50 ? "좋아요! 빨간 단어를 한 번 더 들어 보세요." : "괜찮아요. 🐢 천천히 듣고 다시 해 봐요.";
+    const pass = score >= lv.pass;
+    const cls = pass ? "good" : score >= 50 ? "mid" : "low";
+    const msg = score >= 90 ? "완벽해요! 원어민 같아요 🎉" : pass ? "아주 잘했어요! 통과예요 👏" : score >= 50 ? "좋아요! 빨간 단어를 눌러 한 번 더 들어 보세요." : "괜찮아요. 🐢 천천히 듣고 다시 해 봐요.";
     const missed = words.filter((w) => !w.ok).map((w) => w.text.replace(/[^A-Za-z']/g, "")).filter(Boolean);
     $result.hidden = false;
     $result.innerHTML = `
@@ -483,7 +509,7 @@ function practiceView(lessonId, index) {
       <p class="heard">AI가 들은 말: “${esc(heard)}”</p>
       ${missed.length ? `<div class="row" style="justify-content:center">${missed.slice(0, 4).map((m) => `<button class="mini" data-word="${esc(m)}">🔊 ${esc(m)}</button>`).join("")}</div>` : ""}`;
     $result.querySelectorAll("[data-word]").forEach((b) => (b.onclick = () => speak(b.dataset.word, 0.6)));
-    if (score >= 80) speak(score >= 90 ? "Perfect!" : "Great job!");
+    if (pass) speak(score >= 90 ? "Perfect!" : "Great job!");
   }
 }
 
@@ -493,9 +519,10 @@ function chatListView() {
   setHeader("AI와 대화 연습");
   render(`
     <div class="stack">
-      <p class="muted" style="margin:0">연습할 상황을 고르세요. AI 튜터 <b>써니</b>가 상대 역할을 해요.</p>
+      ${levelPicker()}
+      <p class="muted" style="margin:0">연습할 상황을 고르세요. AI 튜터 <b>써니</b>가 상대 역할을 해요. ${level().chatIntro}</p>
       <div class="grid">
-        ${Object.entries(SCENARIOS).map(([id, s]) => `
+        ${Object.keys(SCENARIOS).map((id) => [id, scenarioFor(id, settings.level)]).map(([id, s]) => `
           <button class="card tile" data-scenario="${id}">
             <span class="emoji">${s.icon}</span>
             <h3>${s.title}</h3>
@@ -514,6 +541,7 @@ function chatListView() {
         </label>
       </section>
     </div>`);
+  bindLevelPicker(chatListView);
   $view.querySelectorAll("[data-scenario]").forEach((b) => (b.onclick = () => chatView(b.dataset.scenario)));
   document.getElementById("autoSpeak").onchange = (e) => { settings.autoSpeak = e.target.checked; saveSettings(); };
   document.getElementById("showKo").onchange = (e) => { settings.showKo = e.target.checked; saveSettings(); };
@@ -539,23 +567,24 @@ async function askTutor(scenario, history, userText) {
       toast("인터넷 연결을 확인해 주세요. 연습용 대본으로 대답해요");
     }
   }
-  return demoReply(scenario, history, userText); // 서버가 안 되면 체험 대본으로
+  return demoReply(scenario, history, userText, settings.level); // 서버가 안 되면 체험 대본으로
 }
 
 function chatView(scenarioId) {
-  const sc = SCENARIOS[scenarioId];
+  const sc = scenarioFor(scenarioId, settings.level);
   const history = [];
   let busy = false;
   setTab("chat");
   setHeader(`${sc.icon} ${sc.title}`, chatListView);
   render(`
+    <section class="card mission"><span class="level-tag">${level().name}</span> <b>🎯 미션</b> ${esc(sc.goal)}</section>
     <div class="chat" id="chat"></div>
     <div class="composer">
       <div class="composer-inner">
         <div class="suggest" id="suggest"></div>
         <div class="interim" id="interim">${canListen ? "🎤 를 누르고 영어로 말해 보세요" : "영어로 입력해 보세요"}</div>
         <form class="input-row" id="form">
-          <input id="text" autocomplete="off" autocapitalize="off" enterkeyhint="send" placeholder="영어로 입력해도 돼요">
+          <input id="text" autocomplete="off" autocapitalize="off" enterkeyhint="send" placeholder="${level().placeholder}">
           <button type="submit" class="send" aria-label="보내기">➤</button>
           ${canListen ? `<button type="button" class="mic" id="mic" aria-label="말하기">🎤</button>` : ""}
         </form>
@@ -697,8 +726,10 @@ function statsView() {
     days.push({ label: "일월화수목금토"[d.getDay()], total: v.sentences + v.turns });
   }
   const max = Math.max(5, ...days.map((d) => d.total));
-  const passed = Object.values(st.best).filter((v) => v >= 80).length;
-  const totalItems = LESSONS.reduce((n, l) => n + l.items.length, 0);
+  const byLevel = Object.entries(LESSONS).map(([k, list]) => {
+    const keys = list.flatMap((l) => l.items.map((_, i) => `${l.id}:${i}`));
+    return { name: LEVEL_INFO[k].name, total: keys.length, passed: keys.filter((key) => (st.best[key] || 0) >= LEVEL_INFO[k].pass).length };
+  });
   render(`
     <div class="stack">
       <div class="stats-row">
@@ -718,9 +749,12 @@ function statsView() {
         </div>
       </section>
       <section class="card stack">
-        <h3>말하기 문장 통과 (80점 이상)</h3>
-        <div class="progress"><i style="width:${(passed / totalItems) * 100}%"></i></div>
-        <span class="small muted">${passed} / ${totalItems} 문장</span>
+        <h3>말하기 문장 통과</h3>
+        ${byLevel.map((b) => `
+          <div class="level-progress">
+            <span class="small"><b>${b.name}</b> <span class="muted">${b.passed} / ${b.total} 문장</span></span>
+            <div class="progress"><i style="width:${(b.passed / b.total) * 100}%"></i></div>
+          </div>`).join("")}
       </section>
       ${installCard(true)}
       ${authState.user ? `<p class="small muted" style="text-align:center">구글 계정에 기록이 저장돼요. 다른 기기에서 로그인해도 이어서 볼 수 있어요.</p>` : `${accountCard()}<p class="small muted" style="text-align:center">기록은 이 기기에만 저장돼요.</p>`}

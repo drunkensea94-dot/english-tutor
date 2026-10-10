@@ -7,7 +7,7 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SCENARIOS, demoReply } from "./public/scenarios.js";
+import { scenarioFor, demoReply } from "./public/scenarios.js";
 import { verifyIdToken } from "./firebase-auth.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -54,10 +54,32 @@ if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) {
   client = new Anthropic();
 }
 
+// 수준마다 AI 말투와 대답 길이, 추천 대답, 교정 기준이 달라요.
 const LEVELS = {
-  beginner: "a complete beginner (CEFR A1). Use very short sentences (max 8 words), only the 500 most common words, present tense when possible.",
-  elementary: "an elementary learner (CEFR A2). Use short, simple sentences (max 12 words) and everyday vocabulary.",
-  intermediate: "an intermediate learner (CEFR B1). Use natural but clear sentences and common idioms only when helpful.",
+  beginner: {
+    who: "a complete beginner (CEFR pre-A1 to A1) who knows only a few English words.",
+    rules: `- reply: ONE very short sentence (max 6 words) using only the most common words, present tense. Then ask a yes/no question or an either/or question ("Hot or iced?") so the learner can answer with one or two words.
+- A one- or two-word answer is a success: praise it, and sometimes model the full short sentence once ("Iced? Great. 'Iced, please.'").
+- Never ask open "why" or "tell me about" questions.
+- correction: only when a mistake makes the meaning unclear. explanation_ko must be very simple and kind.
+- suggestions: 3 answers of 1 to 4 words each (for example "Yes, please." / "Coffee, please.").`,
+  },
+  elementary: {
+    who: "an elementary learner (CEFR A2) who can make short simple sentences.",
+    rules: `- reply: one or two short sentences (max 12 words each) with everyday words. Simple past and future are fine.
+- Ask simple what/where/when/who questions that the learner can answer with one full sentence.
+- If the learner answers with only one word, model the full sentence ("A latte? 'I'd like a latte, please.'").
+- correction: grammar mistakes such as verb forms, tense, articles and prepositions.
+- suggestions: 2-3 complete simple sentences of 4 to 9 words.`,
+  },
+  intermediate: {
+    who: "an intermediate learner (CEFR B1) who can hold a simple conversation and wants to sound more natural.",
+    rules: `- reply: two or three natural sentences at normal native speed, with common phrasal verbs and idioms where they fit.
+- Ask open questions (why, how, what do you think, tell me about) and follow up on details the learner mentioned, so they speak in longer turns.
+- If the learner answers in only a few words, react and then ask for a reason, an example or more detail.
+- correction: real mistakes, and also sentences that are correct but unnatural; give the more natural phrasing a native speaker would use.
+- suggestions: 2-3 answers of 10 to 20 words that use connectors like because, so, but, actually.`,
+  },
 };
 
 const REPLY_SCHEMA = {
@@ -84,7 +106,7 @@ const REPLY_SCHEMA = {
     },
     suggestions: {
       type: "array",
-      description: "2-3 easy things the learner could say next.",
+      description: "Things the learner could say next, sized for their level.",
       items: {
         type: "object",
         additionalProperties: false,
@@ -96,23 +118,30 @@ const REPLY_SCHEMA = {
 };
 
 function systemPrompt(scenario, level) {
+  const lv = LEVELS[level] || LEVELS.beginner;
   return `You are "Sunny", a warm, patient English conversation tutor for Korean speakers.
-The learner is ${LEVELS[level] || LEVELS.beginner}
+The learner is ${lv.who}
 
 Role-play scenario: ${scenario.prompt}
+The learner's mission for this level (in Korean): ${scenario.goal}
+Steer the role-play so the learner can complete the mission.
 
-How to respond:
-- Stay in the role-play. Reply with ONE or TWO short sentences, then usually ask one easy question so the learner keeps talking.
+How to respond at this level:
+${lv.rules}
+
+Always:
+- Stay in the role-play.
 - The learner's text comes from speech recognition, so ignore missing punctuation, capitalization and obvious mis-hearings.
 - If the learner wrote Korean or mixed Korean, gently show them how to say it in English inside your reply.
-- correction: only when the learner's English has a real grammar or word-choice mistake. Give their sentence, a corrected natural version, and a one-line kind explanation in Korean. Otherwise null. Never correct punctuation or capitalization.
-- suggestions: 2-3 short example answers the learner could say next, matching their level, each with Korean meaning.
+- correction: null when there is nothing to fix. Never correct punctuation or capitalization. When you do correct, give their sentence, the corrected version, and a one-line kind explanation in Korean.
+- suggestions: each with a natural Korean meaning in "ko".
 - Be encouraging. Never use emojis in "reply" (it is read aloud).`;
 }
 
 async function aiReply({ scenarioId, level, history, userText }) {
-  const scenario = SCENARIOS[scenarioId] || SCENARIOS.free;
-  if (!client) return demoReply(scenarioId, history, userText);
+  level = LEVELS[level] ? level : "beginner";
+  const scenario = scenarioFor(scenarioId, level);
+  if (!client) return demoReply(scenarioId, history, userText, level);
 
   const messages = [];
   // 대화는 user 차례로 시작해야 하므로, 시작 신호를 먼저 넣습니다.
