@@ -252,3 +252,17 @@ h3 { font-size: 17px; margin: 0; }
 .note b { color: var(--accent-dark); margin-right: 4px; }
 .mission { padding: 12px 14px; font-size: 15px; margin-bottom: 12px; }
 .level-progress { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+
+/* 말하기 단계 */
+.stages { display: flex; flex-direction: column; gap: 10px; }
+.stage { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; align-items: center; text-align: left; padding: 14px 16px; width: 100%; }
+.stage-no { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-dark); font-weight: 700; font-size: 18px; }
+.stage-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.stage-body h3 { margin: 0; }
+.stage.cleared .stage-no { background: var(--good-soft); color: var(--good); }
+.stage.current { border: 2px solid var(--accent); }
+.stage.current .stage-no { background: var(--accent); color: #fff; }
+.stage.locked { opacity: .55; }
+.stage.locked .stage-body .progress { display: none; }
+.stage-go { color: var(--accent-dark); font-weight: 700; font-size: 15px; white-space: nowrap; }
+.stage.bonus { border-style: dashed; }

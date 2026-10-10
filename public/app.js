@@ -1,4 +1,4 @@
-import { LESSONS, ALL_LESSONS } from "./lessons.js";
+import { LESSONS, BONUS, ALL_LESSONS } from "./lessons.js";
 import { SCENARIOS, scenarioFor, demoReply } from "./scenarios.js";
 import { LEVEL_INFO, levelOf } from "./levels.js";
 import { authState, initAuth, onAuthChange, signIn, signOutUser, getIdToken, loadRemoteStats, saveRemoteStats } from "./auth.js";
@@ -134,10 +134,19 @@ const CONTRACTIONS = {
   "don't": "do not", "can't": "can not", "cannot": "can not", "what's": "what is", "let's": "let us", "he's": "he is", "she's": "she is",
   "we're": "we are", "they're": "they are", "isn't": "is not", "doesn't": "does not", "i've": "i have", "there's": "there is",
 };
-const NUMBERS = { 1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten", 20: "twenty" };
+// 음성 인식은 숫자를 "20", "7"처럼 적어 주므로 영어 단어로 바꿔서 비교해요.
+const ONES = "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split(" ");
+const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+function numberWords(w) {
+  if (!/^\d+$/.test(w)) return null;
+  const n = Number(w);
+  if (n < 20) return ONES[n];
+  if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? " " + ONES[n % 10] : "");
+  return w.split("").map((d) => ONES[d]).join(" "); // "123"처럼 붙어서 적힌 숫자 세기
+}
 function normWords(text) {
   return text.toLowerCase().replace(/[’]/g, "'").replace(/[^a-z0-9' ]+/g, " ").split(/\s+/).filter(Boolean)
-    .flatMap((w) => (CONTRACTIONS[w] || NUMBERS[w] || w).split(" "));
+    .flatMap((w) => (CONTRACTIONS[w] || numberWords(w) || w).split(" "));
 }
 // 목표 문장의 각 단어가 들렸는지 LCS로 맞춰 봅니다.
 function scoreSpeech(target, heard) {
@@ -379,7 +388,10 @@ function homeView() {
       </div>
       <button class="card big-choice" data-go="speak">
         <span class="emoji">🎤</span>
-        <span><h3>말하기 연습</h3><p class="small muted">${LESSONS[settings.level].map((l) => l.title).slice(0, 3).join(", ")} 등 ${LESSONS[settings.level].length}개 주제</p></span>
+        <span><h3>말하기 연습</h3><p class="small muted">${(() => {
+          const cur = stageRows(settings.level).find((r) => r.current);
+          return cur ? `${level().name} ${cur.stage}단계 · ${cur.lesson.icon} ${cur.lesson.title} 할 차례예요` : `${level().name} 10단계까지 모두 통과했어요! 🎉`;
+        })()}</p></span>
       </button>
       <button class="card big-choice" data-go="chat">
         <span class="emoji">💬</span>
@@ -400,6 +412,25 @@ function homeView() {
   bindLevelPicker(homeView);
 }
 
+// ---------- 말하기 단계 ----------
+const CLEAR = 4; // 한 단계 6문장 중 4문장을 통과하면 다음 단계가 열려요
+function passedCount(lesson, st, pass) {
+  return lesson.items.filter((_, i) => (st.best[`${lesson.id}:${i}`] || 0) >= pass).length;
+}
+// 수준 안의 1~10단계 상태. 음성 인식이 안 되는 브라우저에서는 통과할 수 없으니 모두 열어 둬요.
+function stageRows(levelKey, st = getStats()) {
+  const pass = LEVEL_INFO[levelKey].pass;
+  let open = true;
+  let currentFound = false;
+  return LESSONS[levelKey].map((lesson, i) => {
+    const passed = passedCount(lesson, st, pass);
+    const row = { lesson, stage: i + 1, passed, cleared: passed >= CLEAR, locked: canListen && !open, current: false };
+    if (!row.cleared && !row.locked && !currentFound) row.current = currentFound = true;
+    open = open && row.cleared;
+    return row;
+  });
+}
+
 // ---------- 말하기 연습 ----------
 function speakListView() {
   setTab("speak");
@@ -410,30 +441,56 @@ function speakListView() {
     <div class="stack">
       ${levelPicker()}
       <p class="muted" style="margin:0">${lv.speakIntro}</p>
-      <div class="grid">
-        ${LESSONS[settings.level].map((l) => {
-          const done = l.items.filter((_, i) => (st.best[`${l.id}:${i}`] || 0) >= lv.pass).length;
-          return `<button class="card tile" data-lesson="${l.id}">
-            <span class="emoji">${l.icon}</span>
-            <span class="tag">${l.tag || lv.tag}</span>
-            <h3>${l.title}</h3>
-            <span class="small muted">${done} / ${l.items.length} 통과</span>
-          </button>`;
-        }).join("")}
+      <p class="small muted" style="margin:0">문장마다 <b>${lv.pass}점</b> 이상이면 통과, 한 단계에서 <b>${CLEAR}문장</b>을 통과하면 다음 단계가 열려요.${canListen ? "" : " 이 브라우저는 음성 인식이 안 돼서 모든 단계를 열어 뒀어요."}</p>
+      <div class="stages">
+        ${stageRows(settings.level, st).map((r) => `
+          <button class="card stage${r.cleared ? " cleared" : ""}${r.locked ? " locked" : ""}${r.current ? " current" : ""}" data-lesson="${r.lesson.id}" data-stage="${r.stage}" ${r.locked ? 'data-locked="1"' : ""}>
+            <span class="stage-no">${r.cleared ? "✓" : r.locked ? "🔒" : r.stage}</span>
+            <span class="stage-body">
+              <span class="small muted">${r.stage}단계${r.cleared ? " · 통과" : ""}</span>
+              <h3>${r.lesson.icon} ${r.lesson.title}</h3>
+              <span class="progress"><i style="width:${(r.passed / r.lesson.items.length) * 100}%"></i></span>
+              <span class="small muted">${r.passed} / ${r.lesson.items.length} 문장 통과</span>
+            </span>
+            ${r.current ? `<span class="stage-go">시작 ›</span>` : ""}
+          </button>`).join("")}
       </div>
-      <p class="small muted" style="margin:0;text-align:center">${lv.pass}점 이상이면 통과예요.</p>
+      <button class="card stage bonus" data-lesson="${BONUS[settings.level].id}">
+        <span class="stage-no">⭐</span>
+        <span class="stage-body">
+          <span class="small muted">보너스 · 언제든 연습할 수 있어요</span>
+          <h3>${BONUS[settings.level].icon} ${BONUS[settings.level].title}</h3>
+          <span class="small muted">${passedCount(BONUS[settings.level], st, lv.pass)} / ${BONUS[settings.level].items.length} 문장 통과</span>
+        </span>
+      </button>
     </div>`);
   bindLevelPicker(speakListView);
-  $view.querySelectorAll("[data-lesson]").forEach((b) => (b.onclick = () => practiceView(b.dataset.lesson, 0)));
+  $view.querySelectorAll("[data-lesson]").forEach((b) => (b.onclick = () => {
+    if (b.dataset.locked) return toast(`${b.dataset.stage - 1}단계에서 ${CLEAR}문장을 통과하면 열려요`);
+    practiceView(b.dataset.lesson, 0);
+  }));
 }
 
-function practiceView(lessonId, index) {
+function finishLesson(lesson, wasCleared) {
+  if (lesson.bonus) return toast("발음 연습을 끝까지 했어요! 👏");
+  const rows = stageRows(lesson.level);
+  const last = lesson.stage === rows.length;
+  if (!rows[lesson.stage - 1].cleared) {
+    return toast(`${CLEAR}문장 이상 통과하면 ${last ? "마지막 단계도 통과예요" : `${lesson.stage + 1}단계가 열려요`}. 한 번 더 해 봐요!`);
+  }
+  if (wasCleared) return toast(`${lesson.stage}단계 복습 완료! 👏`);
+  toast(last ? `🏆 ${LEVEL_INFO[lesson.level].name} 10단계까지 모두 통과했어요!` : `🎉 ${lesson.stage}단계 통과! ${lesson.stage + 1}단계가 열렸어요`);
+}
+
+// wasCleared: 이 단계를 시작할 때 이미 통과한 상태였는지 (끝났을 때 "통과!"와 "복습 완료"를 구별해요)
+function practiceView(lessonId, index, wasCleared) {
   const lesson = ALL_LESSONS.find((l) => l.id === lessonId);
   const lv = LEVEL_INFO[lesson.level];
   const [en, ko, note] = lesson.items[index];
   const key = `${lesson.id}:${index}`;
+  wasCleared ??= !lesson.bonus && stageRows(lesson.level)[lesson.stage - 1].cleared;
   setTab("speak");
-  setHeader(`${lesson.icon} ${lesson.title}`, speakListView);
+  setHeader(lesson.bonus ? `${lesson.icon} ${lesson.title}` : `${lesson.stage}단계 · ${lesson.title}`, speakListView);
   render(`
     <div class="stack">
       <div class="progress"><i style="width:${((index + 1) / lesson.items.length) * 100}%"></i></div>
@@ -464,10 +521,10 @@ function practiceView(lessonId, index) {
   $view.querySelectorAll("[data-say]").forEach((b) => (b.onclick = () => speak(b.dataset.say, 0.6)));
   document.getElementById("listen").onclick = () => speak(en);
   document.getElementById("slow").onclick = () => speak(en, 0.6);
-  document.getElementById("prev").onclick = () => practiceView(lessonId, index - 1);
+  document.getElementById("prev").onclick = () => practiceView(lessonId, index - 1, wasCleared);
   document.getElementById("next").onclick = () => {
-    if (index < lesson.items.length - 1) practiceView(lessonId, index + 1);
-    else { toast("주제를 끝까지 연습했어요! 👏"); speakListView(); }
+    if (index < lesson.items.length - 1) practiceView(lessonId, index + 1, wasCleared);
+    else { finishLesson(lesson, wasCleared); speakListView(); }
   };
 
   let listening = false;
@@ -726,9 +783,9 @@ function statsView() {
     days.push({ label: "일월화수목금토"[d.getDay()], total: v.sentences + v.turns });
   }
   const max = Math.max(5, ...days.map((d) => d.total));
-  const byLevel = Object.entries(LESSONS).map(([k, list]) => {
-    const keys = list.flatMap((l) => l.items.map((_, i) => `${l.id}:${i}`));
-    return { name: LEVEL_INFO[k].name, total: keys.length, passed: keys.filter((key) => (st.best[key] || 0) >= LEVEL_INFO[k].pass).length };
+  const byLevel = Object.keys(LESSONS).map((k) => {
+    const rows = stageRows(k, st);
+    return { name: LEVEL_INFO[k].name, total: rows.length, cleared: rows.filter((r) => r.cleared).length, sentences: rows.reduce((n, r) => n + r.passed, 0) };
   });
   render(`
     <div class="stack">
@@ -749,11 +806,11 @@ function statsView() {
         </div>
       </section>
       <section class="card stack">
-        <h3>말하기 문장 통과</h3>
+        <h3>말하기 단계</h3>
         ${byLevel.map((b) => `
           <div class="level-progress">
-            <span class="small"><b>${b.name}</b> <span class="muted">${b.passed} / ${b.total} 문장</span></span>
-            <div class="progress"><i style="width:${(b.passed / b.total) * 100}%"></i></div>
+            <span class="small"><b>${b.name}</b> <span class="muted">${b.cleared} / ${b.total} 단계 통과 · 문장 ${b.sentences}개 통과</span></span>
+            <div class="progress"><i style="width:${(b.cleared / b.total) * 100}%"></i></div>
           </div>`).join("")}
       </section>
       ${installCard(true)}
