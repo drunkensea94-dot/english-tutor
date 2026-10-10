@@ -1,6 +1,6 @@
 // 앱 화면을 저장해 두어 휴대폰에서 빠르게 열리게 합니다. (/api 요청은 항상 서버로)
-const CACHE = "sunny-tutor-v3";
-const ASSETS = ["./", "index.html", "style.css", "app.js", "auth.js", "lessons.js", "scenarios.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
+const CACHE = "sunny-tutor-v4";
+const ASSETS = ["./", "index.html", "style.css", "app.js", "auth.js", "open-external.js", "lessons.js", "scenarios.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

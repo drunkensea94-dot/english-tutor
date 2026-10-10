@@ -236,3 +236,7 @@ h3 { font-size: 17px; margin: 0; }
   .install { grid-template-columns: 52px 1fr auto; }
   .install-actions { grid-column: auto; flex-direction: column; }
 }
+
+/* 앱 안 브라우저 안내 */
+.inapp { border: 2px solid var(--accent); display: flex; flex-direction: column; gap: 10px; }
+.inapp p { margin: 0; }

@@ -220,7 +220,7 @@ function updateBadge() {
 let installPrompt = null;
 const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-const inAppBrowser = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(navigator.userAgent);
+const inApp = window.inAppBrowser || { inApp: false, canOpenExternal: () => false, openExternal() {} };
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault(); // 브라우저 기본 알림 대신 우리 버튼으로 설치
   installPrompt = e;
@@ -232,9 +232,24 @@ window.addEventListener("appinstalled", () => {
   if (document.querySelector('.tabbar [data-tab="home"]').classList.contains("active")) homeView();
 });
 function installGuide() {
-  if (inAppBrowser) return "지금은 카카오톡 같은 앱 안에서 열려 있어서 설치가 안 돼요. 오른쪽 위 메뉴에서 <b>다른 브라우저로 열기</b>(크롬·사파리)를 누른 뒤 다시 시도해 주세요.";
+  if (inApp.inApp) {
+    return inApp.canOpenExternal()
+      ? "지금은 앱 안에서 열려 있어서 설치가 안 돼요. 위의 <b>크롬·사파리로 열기</b>를 누른 뒤, 새로 열린 화면에서 다시 설치를 눌러 주세요."
+      : "지금은 앱 안에서 열려 있어서 설치가 안 돼요. 오른쪽 위(또는 아래) <b>⋯ 메뉴</b>에서 <b>Safari로 열기</b> 또는 <b>다른 브라우저로 열기</b>를 누르거나, <b>링크 복사</b> 후 사파리·크롬에 붙여 넣어 주세요.";
+  }
   if (isIOS) return "① 사파리 아래쪽 <b>공유 버튼</b>(네모에 화살표 ⬆️)을 눌러요<br>② 목록을 내려서 <b>홈 화면에 추가</b>를 눌러요<br>③ 오른쪽 위 <b>추가</b>를 누르면 끝!";
   return "① 크롬 오른쪽 위 <b>메뉴(⋮)</b>를 눌러요<br>② <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 눌러요<br>③ <b>설치</b>를 누르면 끝!";
+}
+function inAppCard() {
+  if (!inApp.inApp) return "";
+  return `<section class="card inapp">
+    <h3>📢 크롬·사파리에서 열어 주세요</h3>
+    <p class="small muted">카카오톡 같은 앱 안에서는 앱 설치와 마이크가 잘 안 돼요.</p>
+    <div class="row">
+      ${inApp.canOpenExternal() ? `<button class="btn" data-open-external>🌐 크롬·사파리로 열기</button>` : ""}
+      <button class="btn ghost" data-copy-link>🔗 링크 복사</button>
+    </div>
+  </section>`;
 }
 function installCard(force = false) {
   if (isStandalone()) return "";
@@ -253,6 +268,12 @@ function installCard(force = false) {
   </section>`;
 }
 function bindInstallCard() {
+  $view.querySelectorAll("[data-open-external]").forEach((b) => (b.onclick = () => inApp.openExternal()));
+  $view.querySelectorAll("[data-copy-link]").forEach((b) => (b.onclick = async () => {
+    const url = location.origin + location.pathname;
+    try { await navigator.clipboard.writeText(url); toast("링크를 복사했어요. 사파리·크롬 주소창에 붙여 넣어 주세요"); }
+    catch { prompt("이 주소를 복사해서 사파리·크롬에 붙여 넣어 주세요", url); }
+  }));
   $view.querySelectorAll("[data-install]").forEach((b) => (b.onclick = async () => {
     if (installPrompt) {
       installPrompt.prompt();
@@ -324,6 +345,7 @@ function homeView() {
         <h2>Hello! 오늘도 한마디 해 볼까요?</h2>
         <p>듣고, 따라 말하고, AI 친구와 대화하면서 자신감을 키워요.</p>
       </section>
+      ${inAppCard()}
       ${installCard()}
       ${authState.user ? "" : accountCard()}
       <div class="stats-row">
