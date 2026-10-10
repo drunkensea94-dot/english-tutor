@@ -2,6 +2,7 @@ import { LESSONS, BONUS, ALL_LESSONS } from "./lessons.js";
 import { SCENARIOS, scenarioFor, demoReply, FINISH_FEEDBACK } from "./scenarios.js";
 import { LEVEL_INFO, levelOf } from "./levels.js";
 import { authState, initAuth, onAuthChange, signIn, signOutUser, getIdToken, loadRemoteStats, saveRemoteStats } from "./auth.js";
+import { share, copyText, appUrl } from "./share.js";
 
 // ---------- 저장소 (이 기기에만 저장) ----------
 const store = {
@@ -302,9 +303,7 @@ function installCard(force = false) {
 function bindInstallCard() {
   $view.querySelectorAll("[data-open-external]").forEach((b) => (b.onclick = () => inApp.openExternal()));
   $view.querySelectorAll("[data-copy-link]").forEach((b) => (b.onclick = async () => {
-    const url = location.origin + location.pathname;
-    try { await navigator.clipboard.writeText(url); toast("링크를 복사했어요. 사파리·크롬 주소창에 붙여 넣어 주세요"); }
-    catch { prompt("이 주소를 복사해서 사파리·크롬에 붙여 넣어 주세요", url); }
+    if (await copyText(appUrl(), "이 주소를 복사해서 사파리·크롬에 붙여 넣어 주세요")) toast("링크를 복사했어요. 사파리·크롬 주소창에 붙여 넣어 주세요");
   }));
   $view.querySelectorAll("[data-install]").forEach((b) => (b.onclick = async () => {
     if (installPrompt) {
@@ -366,6 +365,34 @@ onAuthChange(async (user) => {
   if (active === "stats") statsView();
 });
 
+// ---------- 공유 ----------
+const APP_NAME = "써니 영어 튜터";
+function shareApp() {
+  share(
+    { title: APP_NAME, text: "AI 튜터 써니와 영어 말하기·대화를 연습해요. 왕초보도 한두 단어부터 차근차근 시작할 수 있어요!", url: appUrl() },
+    { heading: "💌 친구에게 앱 알려 주기", qr: true, toast },
+  );
+}
+// 결과 자랑은 바로 기기 공유 창을 열어요 (안 되는 곳에서는 복사하기 창)
+function shareResult(text) {
+  share({ title: APP_NAME, text, url: appUrl() }, { direct: true, heading: "📤 공유하기", toast });
+}
+function statsShareText(st) {
+  const lines = [st.streak >= 2 ? `${APP_NAME}로 ${st.streak}일 연속 영어 공부 중이에요! 🔥` : `${APP_NAME}로 영어 말하기를 연습하고 있어요! 💪`];
+  const did = [st.sentences && `영어 문장 ${st.sentences}개를 따라 말하고`, st.turns && `대화에서 ${st.turns}번 대답했어요`].filter(Boolean);
+  if (did.length) lines.push(`지금까지 ${did.join(", ").replace(/말하고$/, "말했어요")}.`);
+  const speak = stageRows(settings.level, st).filter((r) => r.cleared).length;
+  const chat = chatStageRows(settings.level, st).filter((r) => r.cleared).length;
+  const stages = [speak && `말하기 ${speak}단계`, chat && `대화 ${chat}단계`].filter(Boolean);
+  if (stages.length) lines.push(`${level().name} 10단계 중 ${stages.join(", ")}를 통과했어요.`);
+  lines.push("같이 해 볼래요? 👇");
+  return lines.join("\n");
+}
+function bindShareButtons() {
+  $view.querySelectorAll("[data-share-app]").forEach((b) => (b.onclick = shareApp));
+  $view.querySelectorAll("[data-share-stats]").forEach((b) => (b.onclick = () => shareResult(statsShareText(getStats()))));
+}
+
 // ---------- 홈 ----------
 function homeView() {
   setTab("home");
@@ -397,8 +424,12 @@ function homeView() {
         <span class="emoji">💬</span>
         <span><h3>AI와 대화 연습</h3><p class="small muted">${(() => {
           const cur = chatStageRows(settings.level).find((r) => r.current);
-          return cur ? `${level().name} ${cur.stage}단계 · ${cur.sc.icon} ${cur.sc.title} 대화할 차례예요` : `${level().name} 대화 10단계를 모두 끝냈어요! 🎉`;
+          return cur ? `${level().name} ${cur.stage}단계 · ${chatName(cur.sc)}할 차례예요` : `${level().name} 대화 10단계를 모두 끝냈어요! 🎉`;
         })()}</p></span>
+      </button>
+      <button class="card big-choice" data-share-app>
+        <span class="emoji">💌</span>
+        <span><h3>친구에게 앱 알려 주기</h3><p class="small muted">카카오톡으로 링크를 보내거나 QR 코드를 보여 줘요</p></span>
       </button>
       ${authState.user ? accountCard() : ""}
       <section class="card stack">
@@ -412,6 +443,7 @@ function homeView() {
   $view.querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => go(b.dataset.go)));
   bindAccountCard();
   bindInstallCard();
+  bindShareButtons();
   bindLevelPicker(homeView);
 }
 
@@ -576,6 +608,8 @@ function practiceView(lessonId, index, wasCleared) {
 // ---------- 대화 연습 ----------
 // ---------- 대화 단계 ----------
 const chatKey = (levelKey, id) => `chat:${levelKey}:${id}`;
+// "카페 주문 대화", "자유 대화" (이미 '대화'로 끝나면 붙이지 않아요)
+const chatName = (sc) => `${sc.icon} ${sc.title}${sc.title.endsWith("대화") ? "" : " 대화"}`;
 // 수준 안의 대화 1~10단계 상태. 대화를 끝까지 하면 그 단계를 통과하고 다음 단계가 열려요.
 function chatStageRows(levelKey, st = getStats()) {
   let open = true;
@@ -793,11 +827,14 @@ function chatView(scenarioId) {
         ${completed && next ? `<button class="btn" data-next>${next.stage}단계로 →</button>` : ""}
         <button class="btn ghost" data-retry>다시 하기</button>
         <button class="btn plain" data-list>단계 목록</button>
+        ${completed ? `<button class="btn plain" data-share>📤 자랑하기</button>` : ""}
       </div>`;
     el.querySelectorAll("[data-fix]").forEach((b) => (b.onclick = () => speak(fixes[b.dataset.fix].corrected)));
     el.querySelector("[data-next]")?.addEventListener("click", () => chatView(next.id));
     el.querySelector("[data-retry]").onclick = () => chatView(scenarioId);
     el.querySelector("[data-list]").onclick = () => chatListView();
+    el.querySelector("[data-share]")?.addEventListener("click", () =>
+      shareResult(`${APP_NAME}에서 ${LEVEL_INFO[levelKey].name} ${row.stage}단계 ${chatName(sc)}를 끝까지 해냈어요! 🎉\n영어로 ${myTurns}번 대답했어요. 같이 해 볼래요? 👇`));
     $chat.append(el);
     scrollDown();
   }
@@ -927,11 +964,20 @@ function statsView() {
             <div class="progress"><i style="width:${(b.chatCleared / b.chatTotal) * 100}%"></i></div>
           </div>`).join("")}
       </section>
+      <section class="card share-card">
+        <h3>친구와 함께해요</h3>
+        <p class="small muted">내 기록을 자랑하거나 친구에게 앱을 알려 줘요.</p>
+        <div class="row">
+          <button class="btn" data-share-stats>📤 내 기록 자랑</button>
+          <button class="btn ghost" data-share-app>💌 앱 알려 주기</button>
+        </div>
+      </section>
       ${installCard(true)}
       ${authState.user ? `<p class="small muted" style="text-align:center">구글 계정에 기록이 저장돼요. 다른 기기에서 로그인해도 이어서 볼 수 있어요.</p>` : `${accountCard()}<p class="small muted" style="text-align:center">기록은 이 기기에만 저장돼요.</p>`}
     </div>`);
   bindAccountCard();
   bindInstallCard();
+  bindShareButtons();
 }
 
 // ---------- 라우팅 ----------
