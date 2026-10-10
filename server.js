@@ -15,15 +15,19 @@ const PUBLIC_DIR = path.join(here, "public");
 const PORT = Number(process.env.PORT) || 3000;
 const MODEL = process.env.TUTOR_MODEL || "claude-opus-5-5";
 
-// 구글 로그인(Firebase). FIREBASE_PROJECT_ID 와 FIREBASE_API_KEY 를 넣으면 켜지고,
-// 그때부터 AI 대화는 로그인한 사람만 쓸 수 있어요.
-const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "";
-const FIREBASE_CONFIG = FIREBASE_PROJECT_ID && process.env.FIREBASE_API_KEY
+// 구글 로그인(Firebase). firebase.config.json 에 웹 앱 설정이 있으면 켜지고
+// (FIREBASE_API_KEY / FIREBASE_PROJECT_ID / FIREBASE_APP_ID 환경 변수로 바꿀 수 있어요),
+// 그때부터 AI 대화는 로그인한 사람만 쓸 수 있어요. 이 값들은 브라우저에 공개되는 값이라 비밀이 아니에요.
+const fileConfig = await fs.readFile(path.join(here, "firebase.config.json"), "utf8").then(JSON.parse).catch(() => ({}));
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || fileConfig.projectId || "";
+const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY || fileConfig.apiKey || "";
+const FIREBASE_APP_ID = process.env.FIREBASE_APP_ID || fileConfig.appId || "";
+const FIREBASE_CONFIG = FIREBASE_PROJECT_ID && FIREBASE_API_KEY
   ? {
-      apiKey: process.env.FIREBASE_API_KEY,
-      authDomain: process.env.FIREBASE_AUTH_DOMAIN || `${FIREBASE_PROJECT_ID}.firebaseapp.com`,
+      apiKey: FIREBASE_API_KEY,
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN || fileConfig.authDomain || `${FIREBASE_PROJECT_ID}.firebaseapp.com`,
       projectId: FIREBASE_PROJECT_ID,
-      ...(process.env.FIREBASE_APP_ID ? { appId: process.env.FIREBASE_APP_ID } : {}),
+      ...(FIREBASE_APP_ID ? { appId: FIREBASE_APP_ID } : {}),
     }
   : null;
 // 비워 두면 로그인한 누구나, 이메일을 쉼표로 적으면 그 사람들만 AI를 쓸 수 있어요.
@@ -31,7 +35,7 @@ const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || "").split(",").map((e) => 
 
 // 로그인이 켜져 있으면 요청의 토큰을 확인해요. 통과하면 null, 아니면 [상태 코드, 메시지].
 async function checkLogin(req) {
-  if (!FIREBASE_CONFIG) return null;
+  if (!FIREBASE_CONFIG || !client) return null;
   const token = /^Bearer (.+)$/.exec(req.headers.authorization || "")?.[1];
   const user = await verifyIdToken(token, FIREBASE_PROJECT_ID).catch((err) => {
     console.error("token check failed", err);
@@ -171,7 +175,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   try {
     if (url.pathname === "/api/status") {
-      return sendJson(res, 200, { aiEnabled: Boolean(client), model: client ? MODEL : null, firebase: FIREBASE_CONFIG, loginRequired: Boolean(FIREBASE_CONFIG) });
+      return sendJson(res, 200, { aiEnabled: Boolean(client), model: client ? MODEL : null, firebase: FIREBASE_CONFIG, loginRequired: Boolean(FIREBASE_CONFIG && client) });
     }
     if (url.pathname === "/api/chat" && req.method === "POST") {
       const denied = await checkLogin(req);

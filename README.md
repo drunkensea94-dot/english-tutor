@@ -48,7 +48,7 @@ Firebase 설정을 넣으면 **구글 계정으로 로그인**할 수 있어요.
 
 - 학습 기록이 구글 계정에 저장돼서 휴대폰과 컴퓨터에서 이어서 볼 수 있어요.
 - AI 대화는 **로그인한 사람만** 쓸 수 있어요. `ALLOWED_EMAILS`에 이메일을 적으면 그 계정만 쓸 수 있어요 (내 API 키 비용 보호).
-- 설정이 없으면 지금처럼 로그인 없이 동작해요.
+- `firebase.config.json` 을 지우면 로그인 없이 동작해요.
 
 설정 순서:
 
@@ -56,14 +56,8 @@ Firebase 설정을 넣으면 **구글 계정으로 로그인**할 수 있어요.
 2. **빌드 → Authentication → 시작하기 → Google** 을 켜고 저장.
 3. **Authentication → 설정 → 승인된 도메인** 에 배포 주소(예: `sunny-english-tutor.onrender.com`)를 추가.
 4. **빌드 → Firestore Database → 데이터베이스 만들기** (프로덕션 모드), **규칙** 탭에 이 저장소의 `firestore.rules` 내용을 붙여 넣고 게시.
-5. **프로젝트 설정(⚙️) → 내 앱 → 웹 앱(</>) 추가** 후 나오는 `apiKey`, `projectId`, `appId` 를 서버 환경 변수에 넣기:
-
-| 환경 변수 | 값 |
-|---|---|
-| `FIREBASE_API_KEY` | `apiKey` 값 (비밀 값은 아니에요) |
-| `FIREBASE_PROJECT_ID` | `projectId` 값 |
-| `FIREBASE_APP_ID` | `appId` 값 |
-| `ALLOWED_EMAILS` | (선택) AI를 쓸 수 있는 이메일, 쉼표로 구분 |
+5. **프로젝트 개요 → + 앱 추가 → 웹(</>)** 으로 앱을 등록하고, 나오는 `apiKey`, `projectId`, `appId` 를 `firebase.config.json` 에 넣기 (공개돼도 괜찮은 값이에요).
+6. (권장) 서버 환경 변수 `ALLOWED_EMAILS` 에 AI를 쓸 수 있는 이메일을 쉼표로 적기. 비워 두면 로그인한 누구나 AI를 쓸 수 있어요.
 
 ## 휴대폰에서 쓰기
 
