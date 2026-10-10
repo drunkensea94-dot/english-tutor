@@ -216,6 +216,60 @@ function updateBadge() {
   badge.title = aiEnabled ? "실제 AI와 대화해요" : "준비된 대본으로 대화해요. 서버에 API 키를 넣으면 AI와 대화할 수 있어요.";
 }
 
+// ---------- 앱 설치 (홈 화면 바로가기) ----------
+let installPrompt = null;
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const inAppBrowser = /KAKAOTALK|NAVER|Instagram|FBAN|FBAV|Line\//i.test(navigator.userAgent);
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault(); // 브라우저 기본 알림 대신 우리 버튼으로 설치
+  installPrompt = e;
+  if (document.querySelector('.tabbar [data-tab="home"]').classList.contains("active")) homeView();
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  toast("앱이 설치됐어요! 홈 화면에서 써니 영어를 찾아보세요 🎉");
+  if (document.querySelector('.tabbar [data-tab="home"]').classList.contains("active")) homeView();
+});
+function installGuide() {
+  if (inAppBrowser) return "지금은 카카오톡 같은 앱 안에서 열려 있어서 설치가 안 돼요. 오른쪽 위 메뉴에서 <b>다른 브라우저로 열기</b>(크롬·사파리)를 누른 뒤 다시 시도해 주세요.";
+  if (isIOS) return "① 사파리 아래쪽 <b>공유 버튼</b>(네모에 화살표 ⬆️)을 눌러요<br>② 목록을 내려서 <b>홈 화면에 추가</b>를 눌러요<br>③ 오른쪽 위 <b>추가</b>를 누르면 끝!";
+  return "① 크롬 오른쪽 위 <b>메뉴(⋮)</b>를 눌러요<br>② <b>앱 설치</b> 또는 <b>홈 화면에 추가</b>를 눌러요<br>③ <b>설치</b>를 누르면 끝!";
+}
+function installCard(force = false) {
+  if (isStandalone()) return "";
+  if (!force && store.get("installDismissed", false)) return "";
+  return `<section class="card install">
+    <img src="icons/icon-192.png" alt="" class="install-icon">
+    <div class="install-text">
+      <h3>앱으로 설치하기</h3>
+      <p class="small muted">홈 화면에 아이콘이 생겨서 앱처럼 바로 열 수 있어요.</p>
+      <p class="small install-guide" hidden>${installGuide()}</p>
+    </div>
+    <div class="install-actions">
+      <button class="btn" data-install>📲 설치</button>
+      ${force ? "" : `<button class="mini" data-install-close>나중에</button>`}
+    </div>
+  </section>`;
+}
+function bindInstallCard() {
+  $view.querySelectorAll("[data-install]").forEach((b) => (b.onclick = async () => {
+    if (installPrompt) {
+      installPrompt.prompt();
+      const { outcome } = await installPrompt.userChoice;
+      installPrompt = null;
+      if (outcome !== "accepted") toast("다음에 설치하고 싶으면 언제든 눌러 주세요");
+    } else {
+      // 아이폰, 카카오톡 등 버튼으로 바로 설치할 수 없는 곳은 방법을 보여 줘요
+      b.closest(".install").querySelector(".install-guide").hidden = false;
+    }
+  }));
+  $view.querySelectorAll("[data-install-close]").forEach((b) => (b.onclick = () => {
+    store.set("installDismissed", true);
+    b.closest(".install").remove();
+  }));
+}
+
 // ---------- 로그인 ----------
 function accountCard() {
   if (!authState.enabled) return "";
@@ -270,6 +324,7 @@ function homeView() {
         <h2>Hello! 오늘도 한마디 해 볼까요?</h2>
         <p>듣고, 따라 말하고, AI 친구와 대화하면서 자신감을 키워요.</p>
       </section>
+      ${installCard()}
       ${authState.user ? "" : accountCard()}
       <div class="stats-row">
         <div class="card stat"><b>${st.streak}</b><span class="small muted">연속 학습일</span></div>
@@ -297,6 +352,7 @@ function homeView() {
     </div>`);
   $view.querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => go(b.dataset.go)));
   bindAccountCard();
+  bindInstallCard();
   $view.querySelectorAll("[data-level]").forEach((b) => (b.onclick = () => {
     settings.level = b.dataset.level;
     saveSettings();
@@ -644,13 +700,11 @@ function statsView() {
         <div class="progress"><i style="width:${(passed / totalItems) * 100}%"></i></div>
         <span class="small muted">${passed} / ${totalItems} 문장</span>
       </section>
-      <section class="card stack">
-        <h3>휴대폰 홈 화면에 앱처럼 추가하기</h3>
-        <span class="small muted">아이폰: 사파리 공유 버튼 → "홈 화면에 추가"<br>안드로이드: 크롬 메뉴(⋮) → "홈 화면에 추가" 또는 "앱 설치"</span>
-      </section>
+      ${installCard(true)}
       ${authState.user ? `<p class="small muted" style="text-align:center">구글 계정에 기록이 저장돼요. 다른 기기에서 로그인해도 이어서 볼 수 있어요.</p>` : `${accountCard()}<p class="small muted" style="text-align:center">기록은 이 기기에만 저장돼요.</p>`}
     </div>`);
   bindAccountCard();
+  bindInstallCard();
 }
 
 // ---------- 라우팅 ----------

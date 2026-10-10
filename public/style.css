@@ -224,3 +224,15 @@ h3 { font-size: 17px; margin: 0; }
 .avatar { width: 44px; height: 44px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--accent-soft); font-size: 22px; object-fit: cover; }
 .btn.google { background: #fff; color: #3c4043; border: 1px solid #dadce0; }
 .btn.google .g { font-weight: 800; color: #4285f4; font-size: 18px; }
+
+/* 앱 설치 */
+.install { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: start; }
+.install-icon { width: 52px; height: 52px; border-radius: 14px; }
+.install-text p { margin: 2px 0 0; }
+.install-guide { background: var(--accent-soft); border-radius: 12px; padding: 10px 12px; margin-top: 8px !important; line-height: 1.7; }
+.install-actions { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; }
+.install-actions .btn { flex: 1; }
+@media (min-width: 560px) {
+  .install { grid-template-columns: 52px 1fr auto; }
+  .install-actions { grid-column: auto; flex-direction: column; }
+}
