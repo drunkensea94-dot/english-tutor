@@ -248,16 +248,19 @@ const COMMON_MISTAKES = [
   [/\byesterday i (go|eat|meet|see)\b/i, (m) => `yesterday I ${{ go: "went", eat: "ate", meet: "met", see: "saw" }[m[1].toLowerCase()]}`, "어제 일은 과거형으로 말해요."],
 ];
 
-const DEMO_DONE = {
-  beginner: ["Great job! Try another one.", "잘했어요! 다른 상황도 해 봐요."],
-  elementary: ["Great job! Let's try another situation.", "잘했어요! 다른 상황도 연습해 볼까요?"],
-  intermediate: ["Well done! You handled that really naturally. Want to try another situation?", "잘했어요! 정말 자연스럽게 해냈어요. 다른 상황도 해 볼까요?"],
+// 대화가 끝났을 때 보여 줄 기본 한마디 (체험 대본, 또는 AI가 한마디를 빠뜨렸을 때)
+export const FINISH_FEEDBACK = {
+  beginner: "짧은 말로도 끝까지 대화했어요! 다음엔 추천 대답을 누르지 말고 직접 말해 보세요.",
+  elementary: "완전한 문장으로 잘 대답했어요. 다음엔 대답 뒤에 한 문장을 더 덧붙여 보세요.",
+  intermediate: "대화를 자연스럽게 이어 갔어요. 다음엔 because나 actually로 이유와 예를 하나 더 넣어 보세요.",
 };
 
+// 대본의 마지막 줄이 써니의 끝인사예요. 그 줄을 말하면 대화가 끝나요.
 export function demoReply(scenarioId, history = [], userText = "", level = "beginner") {
   const sc = scenarioFor(scenarioId, level);
   const step = history.filter((t) => t.role === "ai").length;
-  const [reply, reply_ko, sugg] = sc.demo[Math.min(step, sc.demo.length - 1)];
+  const last = sc.demo.length - 1;
+  const [reply, reply_ko, sugg] = sc.demo[Math.min(step, last)];
   let correction = null;
   for (const [re, fix, why] of COMMON_MISTAKES) {
     const m = userText.match(re);
@@ -266,13 +269,15 @@ export function demoReply(scenarioId, history = [], userText = "", level = "begi
       break;
     }
   }
-  const done = step >= sc.demo.length;
-  const [doneEn, doneKo] = DEMO_DONE[level] || DEMO_DONE.beginner;
+  const done = step > 0 && step >= last;
   return {
-    reply: done ? doneEn : reply,
-    reply_ko: done ? doneKo : reply_ko,
+    reply,
+    reply_ko,
     correction,
     suggestions: done ? [] : sugg.map(([en, ko]) => ({ en, ko })),
+    done,
+    feedback_ko: done ? FINISH_FEEDBACK[level] || FINISH_FEEDBACK.beginner : "",
+    maxTurns: last,
     demo: true,
   };
 }

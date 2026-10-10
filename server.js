@@ -7,7 +7,8 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { scenarioFor, demoReply } from "./public/scenarios.js";
+import { scenarioFor, demoReply, FINISH_FEEDBACK } from "./public/scenarios.js";
+import { LEVEL_INFO } from "./public/levels.js";
 import { verifyIdToken } from "./firebase-auth.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -85,7 +86,7 @@ const LEVELS = {
 const REPLY_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "reply_ko", "correction", "suggestions"],
+  required: ["reply", "reply_ko", "correction", "suggestions", "done", "feedback_ko"],
   properties: {
     reply: { type: "string", description: "Your next line in the role-play, in English." },
     reply_ko: { type: "string", description: "Natural Korean translation of reply." },
@@ -114,11 +115,15 @@ const REPLY_SCHEMA = {
         properties: { en: { type: "string" }, ko: { type: "string" } },
       },
     },
+    done: { type: "boolean", description: "true only when this reply is your closing line and the conversation ends now." },
+    feedback_ko: { type: "string", description: "When done is true: 1-2 short, warm Korean sentences on what the learner did well and one English expression to try next time. Otherwise an empty string." },
   },
 };
 
-function systemPrompt(scenario, level) {
+// turn: 이번이 학습자의 몇 번째 말인지 (0이면 써니가 먼저 인사하는 차례)
+function systemPrompt(scenario, level, turn) {
   const lv = LEVELS[level] || LEVELS.beginner;
+  const { chatTurns, chatMin } = LEVEL_INFO[level] || LEVEL_INFO.beginner;
   return `You are "Sunny", a warm, patient English conversation tutor for Korean speakers.
 The learner is ${lv.who}
 
@@ -135,13 +140,21 @@ Always:
 - If the learner wrote Korean or mixed Korean, gently show them how to say it in English inside your reply.
 - correction: null when there is nothing to fix. Never correct punctuation or capitalization. When you do correct, give their sentence, the corrected version, and a one-line kind explanation in Korean.
 - suggestions: each with a natural Korean meaning in "ko".
-- Be encouraging. Never use emojis in "reply" (it is read aloud).`;
+- Be encouraging. Never use emojis in "reply" (it is read aloud).
+
+Conversation length (the learner sees a counter, so the conversation must really end):
+- The learner speaks at most ${chatTurns} times. ${turn === 0 ? "This is your opening line: greet them and start the role-play. done must be false." : `The learner has now spoken ${turn} of ${chatTurns} times.`}
+${turn === 0 ? "" : turn >= chatTurns
+    ? "- This is the LAST reply. Close the conversation now: a short, warm goodbye that fits the role-play, with no question. Set done to true, suggestions to [], and write feedback_ko."
+    : `- If the mission is clearly complete and the learner has spoken at least ${chatMin} times, close the conversation now (short warm goodbye, no question, done true, suggestions [], feedback_ko). Otherwise keep going: done false, feedback_ko "".${turn === chatTurns - 1 ? " The learner can speak only once more, so ask your final question now and steer toward finishing the mission." : ""}`}`;
 }
 
 async function aiReply({ scenarioId, level, history, userText }) {
   level = LEVELS[level] ? level : "beginner";
   const scenario = scenarioFor(scenarioId, level);
   if (!client) return demoReply(scenarioId, history, userText, level);
+  const maxTurns = LEVEL_INFO[level].chatTurns;
+  const turn = Math.min(history.filter((t) => t.role === "me").length + (userText ? 1 : 0), maxTurns);
 
   const messages = [];
   // 대화는 user 차례로 시작해야 하므로, 시작 신호를 먼저 넣습니다.
@@ -165,15 +178,22 @@ async function aiReply({ scenarioId, level, history, userText }) {
     fallbacks: "default",
     // 실시간 대화라 빠른 응답이 중요하므로 effort 를 낮게 둡니다.
     output_config: { effort: "low", format: { type: "json_schema", schema: REPLY_SCHEMA } },
-    system: systemPrompt(scenario, level) + "\nLatency-sensitive; begin your visible answer immediately.",
+    system: systemPrompt(scenario, level, turn) + "\nLatency-sensitive; begin your visible answer immediately.",
     messages,
   });
 
   if (response.stop_reason === "refusal") {
-    return { reply: "Let's talk about something else. What do you like to do on weekends?", reply_ko: "다른 이야기를 해 볼까요? 주말에 뭐 하는 걸 좋아하세요?", correction: null, suggestions: [] };
+    return { reply: "Let's talk about something else. What do you like to do on weekends?", reply_ko: "다른 이야기를 해 볼까요? 주말에 뭐 하는 걸 좋아하세요?", correction: null, suggestions: [], done: false, feedback_ko: "", maxTurns };
   }
   const text = response.content.filter((b) => b.type === "text").map((b) => b.text).join("");
-  return JSON.parse(text);
+  const result = JSON.parse(text);
+  // 첫인사에서는 끝나지 않고, 정해진 횟수가 되면 AI가 깜빡해도 여기서 끝내요.
+  result.done = turn > 0 && (result.done === true || turn >= maxTurns);
+  if (result.done) {
+    result.suggestions = [];
+    result.feedback_ko ||= FINISH_FEEDBACK[level];
+  } else result.feedback_ko = "";
+  return { ...result, maxTurns };
 }
 
 const MIME = {
