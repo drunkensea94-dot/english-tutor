@@ -1,5 +1,5 @@
 import { LESSONS, BONUS, ALL_LESSONS } from "./lessons.js";
-import { SCENARIOS, scenarioFor, demoReply } from "./scenarios.js";
+import { SCENARIOS, scenarioFor, demoReply, FINISH_FEEDBACK } from "./scenarios.js";
 import { LEVEL_INFO, levelOf } from "./levels.js";
 import { authState, initAuth, onAuthChange, signIn, signOutUser, getIdToken, loadRemoteStats, saveRemoteStats } from "./auth.js";
 
@@ -395,7 +395,10 @@ function homeView() {
       </button>
       <button class="card big-choice" data-go="chat">
         <span class="emoji">💬</span>
-        <span><h3>AI와 대화 연습</h3><p class="small muted">${level().chatIntro}</p></span>
+        <span><h3>AI와 대화 연습</h3><p class="small muted">${(() => {
+          const cur = chatStageRows(settings.level).find((r) => r.current);
+          return cur ? `${level().name} ${cur.stage}단계 · ${cur.sc.icon} ${cur.sc.title} 대화할 차례예요` : `${level().name} 대화 10단계를 모두 끝냈어요! 🎉`;
+        })()}</p></span>
       </button>
       ${authState.user ? accountCard() : ""}
       <section class="card stack">
@@ -571,19 +574,39 @@ function practiceView(lessonId, index, wasCleared) {
 }
 
 // ---------- 대화 연습 ----------
+// ---------- 대화 단계 ----------
+const chatKey = (levelKey, id) => `chat:${levelKey}:${id}`;
+// 수준 안의 대화 1~10단계 상태. 대화를 끝까지 하면 그 단계를 통과하고 다음 단계가 열려요.
+function chatStageRows(levelKey, st = getStats()) {
+  let open = true;
+  let currentFound = false;
+  return Object.keys(SCENARIOS).map((id, i) => {
+    const cleared = (st.best[chatKey(levelKey, id)] || 0) > 0;
+    const row = { id, sc: scenarioFor(id, levelKey), stage: i + 1, cleared, locked: !open, current: false };
+    if (!cleared && !row.locked && !currentFound) row.current = currentFound = true;
+    open = open && cleared;
+    return row;
+  });
+}
+
 function chatListView() {
   setTab("chat");
   setHeader("AI와 대화 연습");
   render(`
     <div class="stack">
       ${levelPicker()}
-      <p class="muted" style="margin:0">연습할 상황을 고르세요. AI 튜터 <b>써니</b>가 상대 역할을 해요. ${level().chatIntro}</p>
-      <div class="grid">
-        ${Object.keys(SCENARIOS).map((id) => [id, scenarioFor(id, settings.level)]).map(([id, s]) => `
-          <button class="card tile" data-scenario="${id}">
-            <span class="emoji">${s.icon}</span>
-            <h3>${s.title}</h3>
-            <span class="small muted">${s.desc}</span>
+      <p class="muted" style="margin:0">AI 튜터 <b>써니</b>가 상대 역할을 해요. ${level().chatIntro}</p>
+      <p class="small muted" style="margin:0">대화마다 대답할 횟수가 정해져 있어요. 끝까지 대화하면 다음 단계가 열려요.</p>
+      <div class="stages">
+        ${chatStageRows(settings.level).map((r) => `
+          <button class="card stage${r.cleared ? " cleared" : ""}${r.locked ? " locked" : ""}${r.current ? " current" : ""}" data-scenario="${r.id}" data-stage="${r.stage}" ${r.locked ? 'data-locked="1"' : ""}>
+            <span class="stage-no">${r.cleared ? "✓" : r.locked ? "🔒" : r.stage}</span>
+            <span class="stage-body">
+              <span class="small muted">${r.stage}단계${r.cleared ? " · 완료" : ""}</span>
+              <h3>${r.sc.icon} ${r.sc.title}</h3>
+              <span class="small muted">${esc(r.sc.desc)}</span>
+            </span>
+            ${r.current ? `<span class="stage-go">시작 ›</span>` : ""}
           </button>`).join("")}
       </div>
       <section class="card">
@@ -599,7 +622,10 @@ function chatListView() {
       </section>
     </div>`);
   bindLevelPicker(chatListView);
-  $view.querySelectorAll("[data-scenario]").forEach((b) => (b.onclick = () => chatView(b.dataset.scenario)));
+  $view.querySelectorAll("[data-scenario]").forEach((b) => (b.onclick = () => {
+    if (b.dataset.locked) return toast(`${b.dataset.stage - 1}단계 대화를 끝까지 하면 열려요`);
+    chatView(b.dataset.scenario);
+  }));
   document.getElementById("autoSpeak").onchange = (e) => { settings.autoSpeak = e.target.checked; saveSettings(); };
   document.getElementById("showKo").onchange = (e) => { settings.showKo = e.target.checked; saveSettings(); };
   document.getElementById("rate").onchange = (e) => { settings.rate = Number(e.target.value); saveSettings(); };
@@ -628,16 +654,31 @@ async function askTutor(scenario, history, userText) {
 }
 
 function chatView(scenarioId) {
-  const sc = scenarioFor(scenarioId, settings.level);
+  const levelKey = settings.level;
+  const sc = scenarioFor(scenarioId, levelKey);
+  const rows = chatStageRows(levelKey);
+  const row = rows.find((r) => r.id === scenarioId);
   const history = [];
+  const fixes = []; // 대화 중에 고쳐 준 문장 (끝나면 다시 들어 볼 수 있게)
   let busy = false;
+  let ended = false;
+  let myTurns = 0;
+  // 대답할 수 있는 횟수. 서버가 대답할 때마다 알려 주고, 그 전에는 짐작해서 보여 줘요.
+  let maxTurns = aiEnabled ? LEVEL_INFO[levelKey].chatTurns : sc.demo.length - 1;
+  let mode = null; // 첫 대답이 AI였는지 체험 대본이었는지
+  let typingEl = null;
   setTab("chat");
-  setHeader(`${sc.icon} ${sc.title}`, chatListView);
+  setHeader(`${row.stage}단계 · ${sc.title}`, chatListView);
   render(`
     <section class="card mission"><span class="level-tag">${level().name}</span> <b>🎯 미션</b> ${esc(sc.goal)}</section>
     <div class="chat" id="chat"></div>
     <div class="composer">
       <div class="composer-inner">
+        <div class="composer-top">
+          <span class="turn-count" id="turnCount"></span>
+          <span class="turn-bar progress"><i id="turnBar"></i></span>
+          <button class="mini" id="endBtn" type="button">대화 끝내기</button>
+        </div>
         <div class="suggest" id="suggest"></div>
         <div class="interim" id="interim">${canListen ? "🎤 를 누르고 영어로 말해 보세요" : "영어로 입력해 보세요"}</div>
         <form class="input-row" id="form">
@@ -648,12 +689,24 @@ function chatView(scenarioId) {
       </div>
     </div>`);
 
+  // 다른 화면으로 가면 이 대화는 끝난 것으로 쳐요. 늦게 온 대답이 새 화면을 건드리지 않게요.
+  cleanup = () => { ended = true; };
+
   const $chat = document.getElementById("chat");
+  const $composer = $view.querySelector(".composer");
+  const $count = document.getElementById("turnCount");
+  const $bar = document.getElementById("turnBar");
+  const $endBtn = document.getElementById("endBtn");
   const $suggest = document.getElementById("suggest");
   const $interim = document.getElementById("interim");
   const $input = document.getElementById("text");
   const $mic = document.getElementById("mic");
   const scrollDown = () => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  function updateTurns() {
+    $count.textContent = `내 대답 ${myTurns} / ${maxTurns}${myTurns === maxTurns - 1 ? " · 다음이 마지막" : ""}`;
+    $bar.style.width = `${Math.min(100, (myTurns / maxTurns) * 100)}%`;
+  }
+  updateTurns();
 
   function addMe(text) {
     const el = document.createElement("div");
@@ -710,31 +763,85 @@ function chatView(scenarioId) {
     return el;
   }
 
+  // 대화 끝: 입력창을 닫고 결과 카드를 보여 줘요. completed 면 이 단계를 통과해요.
+  function finish(completed, feedback = "") {
+    if (ended) return;
+    ended = true;
+    stopListening();
+    typingEl?.remove();
+    $composer.remove();
+    $chat.classList.add("ended");
+    if (completed) recordPractice("chat", { key: chatKey(levelKey, scenarioId), value: 100 });
+    if (completed && !feedback) feedback = FINISH_FEEDBACK[levelKey];
+    const next = rows[row.stage]; // 다음 단계 (없으면 마지막 단계)
+    const note = completed
+      ? (!next ? `${LEVEL_INFO[levelKey].name} 대화 10단계를 모두 끝냈어요! 🏆` : row.cleared ? "" : `${next.stage}단계가 열렸어요!`)
+      : (row.cleared ? "" : next ? "끝까지 대화하면 다음 단계가 열려요." : "끝까지 대화하면 이 단계를 통과해요.");
+    const el = document.createElement("section");
+    el.className = "card chat-end";
+    el.innerHTML = `
+      <div class="end-emoji">${completed ? "🎉" : "👋"}</div>
+      <h3>${completed ? `${row.stage}단계 대화 완료!` : "대화를 끝냈어요"}</h3>
+      ${note ? `<p class="small muted">${note}</p>` : ""}
+      <div class="end-stats">
+        <div><b>${myTurns}</b><span class="small muted">내가 대답한 횟수</span></div>
+        <div><b>${fixes.length}</b><span class="small muted">고친 문장</span></div>
+      </div>
+      ${feedback ? `<p class="end-feedback">💬 ${esc(feedback)}</p>` : ""}
+      ${fixes.length ? `<div class="end-fixes"><b class="small">다시 말해 볼 문장</b>${fixes.map((f, i) => `<button class="mini" data-fix="${i}">🔊 ${esc(f.corrected)}</button>`).join("")}</div>` : ""}
+      <div class="end-actions">
+        ${completed && next ? `<button class="btn" data-next>${next.stage}단계로 →</button>` : ""}
+        <button class="btn ghost" data-retry>다시 하기</button>
+        <button class="btn plain" data-list>단계 목록</button>
+      </div>`;
+    el.querySelectorAll("[data-fix]").forEach((b) => (b.onclick = () => speak(fixes[b.dataset.fix].corrected)));
+    el.querySelector("[data-next]")?.addEventListener("click", () => chatView(next.id));
+    el.querySelector("[data-retry]").onclick = () => chatView(scenarioId);
+    el.querySelector("[data-list]").onclick = () => chatListView();
+    $chat.append(el);
+    scrollDown();
+  }
+  $endBtn.onclick = () => finish(false);
+
   async function turn(userText) {
-    if (busy) return;
+    if (busy || ended) return;
     busy = true;
     let meEl = null;
     if (userText) meEl = addMe(userText);
     showSuggestions([]);
-    const typing = showTyping();
+    $endBtn.disabled = true; // 대답을 기다리는 동안에는 끝내지 않아요 (마지막 대답이 사라지지 않게)
+    typingEl = showTyping();
     const data = await askTutor(scenarioId, history.slice(), userText);
-    typing.remove();
+    if (ended) return; // 기다리는 동안 다른 화면으로 갔어요
+    typingEl.remove();
+    $endBtn.disabled = false;
     if (userText) {
       history.push({ role: "me", text: userText });
       recordPractice("turn");
+      myTurns++;
     }
+    // AI와 대화하다가 잠깐 오류로 체험 대본이 대답했다면, 대본의 횟수나 끝 신호는 따르지 않아요.
+    const fallback = mode === "ai" && data.demo;
+    mode ??= data.demo ? "demo" : "ai";
+    if (data.maxTurns && !fallback) maxTurns = data.maxTurns;
     history.push({ role: "ai", text: data.reply });
-    if (meEl) addFix(meEl, data.correction);
+    if (meEl && data.correction) {
+      addFix(meEl, data.correction);
+      fixes.push(data.correction);
+    }
     addAi(data);
-    showSuggestions(data.suggestions);
+    updateTurns();
     busy = false;
+    // 서버가 끝났다고 알려 주거나, 정해진 횟수를 다 채우면 대화가 끝나요.
+    if ((data.done && !fallback) || (userText && myTurns >= maxTurns)) finish(true, data.feedback_ko);
+    else showSuggestions(data.suggestions);
     if (settings.autoSpeak) await speak(data.reply);
   }
 
   document.getElementById("form").onsubmit = (e) => {
     e.preventDefault();
     const t = $input.value.trim();
-    if (!t) return;
+    if (!t || busy || ended) return; // 기다리는 중에는 쓴 글을 지우지 않고 그대로 둬요
     $input.value = "";
     turn(t);
   };
@@ -743,7 +850,7 @@ function chatView(scenarioId) {
     let listening = false;
     $mic.onclick = async () => {
       if (listening) return stopListening();
-      if (busy) return;
+      if (busy || ended) return;
       listening = true;
       $mic.classList.add("listening");
       $mic.textContent = "■";
@@ -785,7 +892,11 @@ function statsView() {
   const max = Math.max(5, ...days.map((d) => d.total));
   const byLevel = Object.keys(LESSONS).map((k) => {
     const rows = stageRows(k, st);
-    return { name: LEVEL_INFO[k].name, total: rows.length, cleared: rows.filter((r) => r.cleared).length, sentences: rows.reduce((n, r) => n + r.passed, 0) };
+    const chats = chatStageRows(k, st);
+    return {
+      name: LEVEL_INFO[k].name, total: rows.length, cleared: rows.filter((r) => r.cleared).length, sentences: rows.reduce((n, r) => n + r.passed, 0),
+      chatTotal: chats.length, chatCleared: chats.filter((r) => r.cleared).length,
+    };
   });
   render(`
     <div class="stack">
@@ -806,11 +917,14 @@ function statsView() {
         </div>
       </section>
       <section class="card stack">
-        <h3>말하기 단계</h3>
+        <h3>단계 진행</h3>
         ${byLevel.map((b) => `
           <div class="level-progress">
-            <span class="small"><b>${b.name}</b> <span class="muted">${b.cleared} / ${b.total} 단계 통과 · 문장 ${b.sentences}개 통과</span></span>
+            <b class="small">${b.name}</b>
+            <span class="small muted">🎤 말하기 ${b.cleared} / ${b.total} 단계 · 문장 ${b.sentences}개 통과</span>
             <div class="progress"><i style="width:${(b.cleared / b.total) * 100}%"></i></div>
+            <span class="small muted">💬 대화 ${b.chatCleared} / ${b.chatTotal} 단계</span>
+            <div class="progress"><i style="width:${(b.chatCleared / b.chatTotal) * 100}%"></i></div>
           </div>`).join("")}
       </section>
       ${installCard(true)}

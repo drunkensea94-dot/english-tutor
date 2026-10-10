@@ -13,6 +13,8 @@ export const LEVEL_INFO = {
     rate: 0.7,
     showKo: true,
     pass: 70,
+    chatTurns: 5, // AI 대화에서 학습자가 말하는 최대 횟수
+    chatMin: 3, // 미션을 끝내면 이만큼 말한 뒤부터 일찍 끝날 수 있어요
   },
   elementary: {
     name: "초급",
@@ -27,6 +29,8 @@ export const LEVEL_INFO = {
     rate: 0.9,
     showKo: true,
     pass: 80,
+    chatTurns: 6,
+    chatMin: 4,
   },
   intermediate: {
     name: "중급",
@@ -41,7 +45,9 @@ export const LEVEL_INFO = {
     rate: 1,
     showKo: false,
     pass: 80,
+    chatTurns: 8,
+    chatMin: 5,
   },
 };
 
-export const levelOf = (level) => (LEVEL_INFO[level] ? level : "beginner");
+export const levelOf = (level) => (Object.prototype.hasOwnProperty.call(LEVEL_INFO, level) ? level : "beginner");

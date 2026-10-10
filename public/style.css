@@ -266,3 +266,21 @@ h3 { font-size: 17px; margin: 0; }
 .stage.locked .stage-body .progress { display: none; }
 .stage-go { color: var(--accent-dark); font-weight: 700; font-size: 15px; white-space: nowrap; }
 .stage.bonus { border-style: dashed; }
+
+/* 대화 진행과 끝 */
+.composer-top { display: flex; align-items: center; gap: 10px; }
+.turn-count { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.turn-bar { flex: 1; }
+.chat.ended { padding-bottom: 32px; }
+.chat-end { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; margin-top: 6px; }
+.chat-end h3 { font-size: 20px; }
+.chat-end p { margin: 0; }
+.end-emoji { font-size: 40px; line-height: 1; }
+.end-stats { display: flex; gap: 28px; justify-content: center; }
+.end-stats > div { display: flex; flex-direction: column; align-items: center; }
+.end-stats b { font-size: 26px; color: var(--accent-dark); }
+.end-feedback { background: var(--accent-soft); border-radius: 12px; padding: 10px 12px; text-align: left; width: 100%; font-size: 15px; }
+.end-fixes { display: flex; flex-direction: column; gap: 6px; width: 100%; text-align: left; }
+.end-fixes .mini { text-align: left; color: var(--text); font-size: 14px; padding: 6px 12px; }
+.end-actions { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+.end-actions .btn { flex: 1; min-width: 110px; }
