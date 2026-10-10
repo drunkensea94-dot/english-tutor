@@ -1,6 +1,6 @@
 // 앱 화면을 저장해 두어 휴대폰에서 빠르게 열리게 합니다. (/api 요청은 항상 서버로)
-const CACHE = "sunny-tutor-v1";
-const ASSETS = ["./", "index.html", "style.css", "app.js", "lessons.js", "scenarios.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
+const CACHE = "sunny-tutor-v2";
+const ASSETS = ["./", "index.html", "style.css", "app.js", "auth.js", "lessons.js", "scenarios.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
@@ -10,7 +10,8 @@ self.addEventListener("activate", (e) => {
 });
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== "GET" || url.pathname.includes("/api/")) return;
+  // 같은 사이트의 화면 파일만 저장해요 (구글 로그인 등 다른 사이트 요청은 건드리지 않아요)
+  if (e.request.method !== "GET" || url.origin !== self.location.origin || url.pathname.includes("/api/")) return;
   // 네트워크 우선, 안 되면 저장본
   e.respondWith(
     fetch(e.request)

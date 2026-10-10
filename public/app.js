@@ -1,5 +1,6 @@
 import { LESSONS } from "./lessons.js";
 import { SCENARIOS, demoReply } from "./scenarios.js";
+import { authState, initAuth, onAuthChange, signIn, signOutUser, getIdToken, loadRemoteStats, saveRemoteStats } from "./auth.js";
 
 // ---------- 저장소 (이 기기에만 저장) ----------
 const store = {
@@ -22,6 +23,17 @@ function recordPractice(kind, score) {
   if (kind === "turn") { s.turns++; d.turns++; }
   if (score != null && score.key) s.best[score.key] = Math.max(s.best[score.key] || 0, score.value);
   store.set("stats", s);
+  saveRemoteStats(s);
+}
+// 두 기기의 기록을 합칠 때는 항목마다 큰 값을 남겨요.
+function mergeStats(a, b) {
+  const out = { days: {}, sentences: Math.max(a.sentences || 0, b.sentences || 0), turns: Math.max(a.turns || 0, b.turns || 0), best: { ...a.best } };
+  for (const [k, v] of Object.entries(b.best || {})) out.best[k] = Math.max(out.best[k] || 0, v);
+  for (const k of new Set([...Object.keys(a.days || {}), ...Object.keys(b.days || {})])) {
+    const x = a.days?.[k] || {}, y = b.days?.[k] || {};
+    out.days[k] = { sentences: Math.max(x.sentences || 0, y.sentences || 0), turns: Math.max(x.turns || 0, y.turns || 0) };
+  }
+  return out;
 }
 function getStats() {
   const s = store.get("stats", { days: {}, sentences: 0, turns: 0, best: {} });
@@ -181,18 +193,71 @@ const LEVEL_NAMES = { beginner: "왕초보", elementary: "초급", intermediate:
 let aiEnabled = false;
 let serverOnline = true;
 async function checkStatus() {
-  const badge = document.getElementById("modeBadge");
   try {
     const r = await fetch("api/status");
     const s = await r.json();
     aiEnabled = s.aiEnabled;
+    await initAuth(s);
   } catch {
     serverOnline = false;
+  }
+  updateBadge();
+}
+function updateBadge() {
+  const badge = document.getElementById("modeBadge");
+  if (aiEnabled && authState.required && !authState.user) {
+    badge.textContent = "로그인 필요";
+    badge.classList.remove("ai");
+    badge.title = "로그인하면 AI와 대화할 수 있어요";
+    return;
   }
   badge.textContent = aiEnabled ? "AI 연결됨" : "체험 모드";
   badge.classList.toggle("ai", aiEnabled);
   badge.title = aiEnabled ? "실제 AI와 대화해요" : "준비된 대본으로 대화해요. 서버에 API 키를 넣으면 AI와 대화할 수 있어요.";
 }
+
+// ---------- 로그인 ----------
+function accountCard() {
+  if (!authState.enabled) return "";
+  const u = authState.user;
+  if (!u) {
+    return `<section class="card account">
+      <div><h3>구글 계정으로 로그인</h3>
+      <p class="small muted">${authState.required ? "로그인하면 AI와 대화할 수 있고, " : ""}휴대폰과 컴퓨터에서 학습 기록을 이어서 볼 수 있어요.</p></div>
+      <button class="btn google" id="loginBtn"><span class="g">G</span> 구글로 로그인</button>
+    </section>`;
+  }
+  return `<section class="card account in">
+    ${u.photoURL ? `<img class="avatar" src="${esc(u.photoURL)}" alt="" referrerpolicy="no-referrer">` : `<span class="avatar">🙂</span>`}
+    <div class="who"><b>${esc(u.displayName || "학습자")}</b><span class="small muted">${esc(u.email || "")} · 기록 동기화 중</span></div>
+    <button class="mini" id="logoutBtn">로그아웃</button>
+  </section>`;
+}
+function bindAccountCard() {
+  const login = document.getElementById("loginBtn");
+  if (login) login.onclick = async () => {
+    login.disabled = true;
+    try { await signIn(); } catch (err) { console.error(err); toast("로그인하지 못했어요. 다시 시도해 주세요."); }
+    login.disabled = false;
+  };
+  const logout = document.getElementById("logoutBtn");
+  if (logout) logout.onclick = async () => { await signOutUser(); toast("로그아웃했어요"); };
+}
+onAuthChange(async (user) => {
+  updateBadge();
+  if (user) {
+    try {
+      const remote = await loadRemoteStats();
+      const merged = remote ? mergeStats(store.get("stats", { days: {}, sentences: 0, turns: 0, best: {} }), remote) : store.get("stats", null);
+      if (merged) { store.set("stats", merged); saveRemoteStats(merged); }
+    } catch (err) {
+      console.error("기록 불러오기 실패", err);
+    }
+  }
+  const active = document.querySelector(".tabbar button.active")?.dataset.tab;
+  if (active === "home") homeView();
+  if (active === "stats") statsView();
+});
 
 // ---------- 홈 ----------
 function homeView() {
@@ -205,6 +270,7 @@ function homeView() {
         <h2>Hello! 오늘도 한마디 해 볼까요?</h2>
         <p>듣고, 따라 말하고, AI 친구와 대화하면서 자신감을 키워요.</p>
       </section>
+      ${authState.user ? "" : accountCard()}
       <div class="stats-row">
         <div class="card stat"><b>${st.streak}</b><span class="small muted">연속 학습일</span></div>
         <div class="card stat"><b>${st.today.sentences}</b><span class="small muted">오늘 말한 문장</span></div>
@@ -218,6 +284,7 @@ function homeView() {
         <span class="emoji">💬</span>
         <span><h3>AI와 대화 연습</h3><p class="small muted">카페, 여행, 자기소개 상황에서 실제처럼 대화해요</p></span>
       </button>
+      ${authState.user ? accountCard() : ""}
       <section class="card stack">
         <h3>내 수준</h3>
         <div class="levels">
@@ -229,6 +296,7 @@ function homeView() {
       ${!serverOnline ? `<div class="notice">서버에 연결되지 않아 체험 모드로 동작해요.</div>` : ""}
     </div>`);
   $view.querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => go(b.dataset.go)));
+  bindAccountCard();
   $view.querySelectorAll("[data-level]").forEach((b) => (b.onclick = () => {
     settings.level = b.dataset.level;
     saveSettings();
@@ -377,13 +445,18 @@ function chatListView() {
 async function askTutor(scenario, history, userText) {
   if (serverOnline) {
     try {
+      const headers = { "Content-Type": "application/json" };
+      const token = await getIdToken().catch(() => null);
+      if (token) headers.Authorization = `Bearer ${token}`;
       const r = await fetch("api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ scenario, level: settings.level, history, userText }),
       });
       if (r.ok) return await r.json();
-      toast("AI 연결에 문제가 있어 연습용 대본으로 대답해요");
+      if (r.status === 401) toast("홈에서 로그인하면 AI와 대화할 수 있어요. 지금은 연습용 대본으로 대답해요");
+      else if (r.status === 403) toast("AI 대화가 허락되지 않은 계정이에요. 연습용 대본으로 대답해요");
+      else toast("AI 연결에 문제가 있어 연습용 대본으로 대답해요");
     } catch {
       toast("인터넷 연결을 확인해 주세요. 연습용 대본으로 대답해요");
     }
@@ -575,8 +648,9 @@ function statsView() {
         <h3>휴대폰 홈 화면에 앱처럼 추가하기</h3>
         <span class="small muted">아이폰: 사파리 공유 버튼 → "홈 화면에 추가"<br>안드로이드: 크롬 메뉴(⋮) → "홈 화면에 추가" 또는 "앱 설치"</span>
       </section>
-      <p class="small muted" style="text-align:center">기록은 이 기기에만 저장돼요.</p>
+      ${authState.user ? `<p class="small muted" style="text-align:center">구글 계정에 기록이 저장돼요. 다른 기기에서 로그인해도 이어서 볼 수 있어요.</p>` : `${accountCard()}<p class="small muted" style="text-align:center">기록은 이 기기에만 저장돼요.</p>`}
     </div>`);
+  bindAccountCard();
 }
 
 // ---------- 라우팅 ----------

@@ -8,11 +8,41 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { SCENARIOS, demoReply } from "./public/scenarios.js";
+import { verifyIdToken } from "./firebase-auth.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(here, "public");
 const PORT = Number(process.env.PORT) || 3000;
 const MODEL = process.env.TUTOR_MODEL || "claude-opus-5-5";
+
+// 구글 로그인(Firebase). FIREBASE_PROJECT_ID 와 FIREBASE_API_KEY 를 넣으면 켜지고,
+// 그때부터 AI 대화는 로그인한 사람만 쓸 수 있어요.
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "";
+const FIREBASE_CONFIG = FIREBASE_PROJECT_ID && process.env.FIREBASE_API_KEY
+  ? {
+      apiKey: process.env.FIREBASE_API_KEY,
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN || `${FIREBASE_PROJECT_ID}.firebaseapp.com`,
+      projectId: FIREBASE_PROJECT_ID,
+      ...(process.env.FIREBASE_APP_ID ? { appId: process.env.FIREBASE_APP_ID } : {}),
+    }
+  : null;
+// 비워 두면 로그인한 누구나, 이메일을 쉼표로 적으면 그 사람들만 AI를 쓸 수 있어요.
+const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+
+// 로그인이 켜져 있으면 요청의 토큰을 확인해요. 통과하면 null, 아니면 [상태 코드, 메시지].
+async function checkLogin(req) {
+  if (!FIREBASE_CONFIG) return null;
+  const token = /^Bearer (.+)$/.exec(req.headers.authorization || "")?.[1];
+  const user = await verifyIdToken(token, FIREBASE_PROJECT_ID).catch((err) => {
+    console.error("token check failed", err);
+    return null;
+  });
+  if (!user) return [401, "로그인이 필요해요."];
+  if (ALLOWED_EMAILS.length && !(user.emailVerified && ALLOWED_EMAILS.includes(user.email.toLowerCase()))) {
+    return [403, "AI 대화가 허락되지 않은 계정이에요."];
+  }
+  return null;
+}
 
 let client = null;
 if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) {
@@ -141,9 +171,11 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   try {
     if (url.pathname === "/api/status") {
-      return sendJson(res, 200, { aiEnabled: Boolean(client), model: client ? MODEL : null });
+      return sendJson(res, 200, { aiEnabled: Boolean(client), model: client ? MODEL : null, firebase: FIREBASE_CONFIG, loginRequired: Boolean(FIREBASE_CONFIG) });
     }
     if (url.pathname === "/api/chat" && req.method === "POST") {
+      const denied = await checkLogin(req);
+      if (denied) return sendJson(res, denied[0], { error: denied[1] });
       const body = await readBody(req);
       const result = await aiReply({
         scenarioId: body.scenario,
@@ -174,4 +206,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`AI English Tutor: http://localhost:${PORT}`);
   console.log(client ? `AI 모드 (${MODEL})` : "체험 모드: ANTHROPIC_API_KEY 를 설정하면 실제 AI와 대화할 수 있어요.");
+  console.log(FIREBASE_CONFIG ? `구글 로그인 켜짐 (${FIREBASE_PROJECT_ID})${ALLOWED_EMAILS.length ? `, 허용 계정 ${ALLOWED_EMAILS.length}개` : ""}` : "구글 로그인 꺼짐");
 });

@@ -12,7 +12,7 @@
 |---|---|
 | 🎤 말하기 | 6개 주제, 36개 문장. 🔊 원어민 발음 듣기 → 🐢 천천히 듣기 → 🎤 따라 말하면 **점수와 틀린 단어**를 빨간색으로 알려 줘요. |
 | 💬 대화 | 자기소개·카페 주문·길 묻기·공항·쇼핑·자유 대화. AI 튜터 "써니"가 상대 역할을 하고, 매 대답마다 **한국어 해석**, **틀린 문장 교정**, **다음에 할 말 추천**을 보여 줘요. 마이크로 말하거나 글자로 입력할 수 있어요. |
-| 📈 기록 | 연속 학습일, 최근 7일 학습량, 통과한 문장 수 (이 기기에만 저장). |
+| 📈 기록 | 연속 학습일, 최근 7일 학습량, 통과한 문장 수. 구글 로그인하면 기기끼리 동기화돼요. |
 | 수준 선택 | 왕초보·초급·중급. AI가 수준에 맞춰 단어와 문장 길이를 조절해요. |
 
 ## 실행 방법 (컴퓨터)
@@ -42,6 +42,29 @@ $env:ANTHROPIC_API_KEY="sk-ant-..."; npm start
 오른쪽 위 배지가 **"AI 연결됨"**으로 바뀌면 성공이에요.
 기본 모델은 `claude-opus-5-5`이고, `TUTOR_MODEL` 환경 변수로 바꿀 수 있어요. API 키는 서버에만 있고 브라우저로 보내지지 않아요.
 
+## 구글 로그인 (선택)
+
+Firebase 설정을 넣으면 **구글 계정으로 로그인**할 수 있어요.
+
+- 학습 기록이 구글 계정에 저장돼서 휴대폰과 컴퓨터에서 이어서 볼 수 있어요.
+- AI 대화는 **로그인한 사람만** 쓸 수 있어요. `ALLOWED_EMAILS`에 이메일을 적으면 그 계정만 쓸 수 있어요 (내 API 키 비용 보호).
+- 설정이 없으면 지금처럼 로그인 없이 동작해요.
+
+설정 순서:
+
+1. [Firebase 콘솔](https://console.firebase.google.com)에서 **프로젝트 추가** (Google 애널리틱스는 꺼도 돼요).
+2. **빌드 → Authentication → 시작하기 → Google** 을 켜고 저장.
+3. **Authentication → 설정 → 승인된 도메인** 에 배포 주소(예: `sunny-english-tutor.onrender.com`)를 추가.
+4. **빌드 → Firestore Database → 데이터베이스 만들기** (프로덕션 모드), **규칙** 탭에 이 저장소의 `firestore.rules` 내용을 붙여 넣고 게시.
+5. **프로젝트 설정(⚙️) → 내 앱 → 웹 앱(</>) 추가** 후 나오는 `apiKey`, `projectId`, `appId` 를 서버 환경 변수에 넣기:
+
+| 환경 변수 | 값 |
+|---|---|
+| `FIREBASE_API_KEY` | `apiKey` 값 (비밀 값은 아니에요) |
+| `FIREBASE_PROJECT_ID` | `projectId` 값 |
+| `FIREBASE_APP_ID` | `appId` 값 |
+| `ALLOWED_EMAILS` | (선택) AI를 쓸 수 있는 이메일, 쉼표로 구분 |
+
 ## 휴대폰에서 쓰기
 
 - 마이크(음성 인식)는 보안 연결(**https**)에서만 동작해요. 컴퓨터의 `localhost`는 괜찮지만, 휴대폰에서 `http://192.168.x.x:3000` 처럼 접속하면 마이크가 막혀요.
@@ -67,6 +90,9 @@ $env:ANTHROPIC_API_KEY="sk-ant-..."; npm start
 
 ```
 server.js              Node 서버 (정적 파일 + /api/chat AI 호출, 의존성은 Anthropic SDK 하나)
+firebase-auth.js       로그인 토큰 확인 (서버)
+firestore.rules        Firestore 보안 규칙 (Firebase 콘솔에 붙여 넣기)
+public/auth.js         구글 로그인, 기록 동기화 (화면)
 public/index.html      화면 뼈대
 public/app.js          화면 로직, 음성 인식/출력, 발음 채점
 public/style.css       디자인 (다크 모드 지원)

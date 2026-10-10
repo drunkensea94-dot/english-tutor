@@ -214,3 +214,13 @@ h3 { font-size: 17px; margin: 0; }
 
 .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
 .switch input { width: 22px; height: 22px; accent-color: var(--accent); }
+
+/* 로그인 */
+.account { display: flex; flex-direction: column; gap: 12px; }
+.account p { margin: 4px 0 0; }
+.account.in { flex-direction: row; align-items: center; }
+.account .who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.account .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar { width: 44px; height: 44px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--accent-soft); font-size: 22px; object-fit: cover; }
+.btn.google { background: #fff; color: #3c4043; border: 1px solid #dadce0; }
+.btn.google .g { font-weight: 800; color: #4285f4; font-size: 18px; }
