@@ -15,6 +15,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(here, "public");
 const PORT = Number(process.env.PORT) || 3000;
 const MODEL = process.env.TUTOR_MODEL || "claude-opus-5-5";
+// 링크 미리보기(카카오톡 등)에 쓰는 이 사이트 주소. Render 는 RENDER_EXTERNAL_URL 을 알아서 넣어 줘요.
+const PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "").replace(/\/+$/, "");
 
 // 구글 로그인(Firebase). firebase.config.json 에 웹 앱 설정이 있으면 켜지고
 // (FIREBASE_API_KEY / FIREBASE_PROJECT_ID / FIREBASE_APP_ID 환경 변수로 바꿀 수 있어요),
@@ -200,9 +202,19 @@ async function aiReply({ scenarioId, level, history, userText }) {
   return { ...result, maxTurns };
 }
 
+// 미리보기 그림 주소는 https://... 처럼 전체 주소여야 해요.
+function siteOrigin(req) {
+  if (PUBLIC_URL) return PUBLIC_URL;
+  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
+  const proto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https" ? "https" : "http";
+  return /^[a-z0-9.-]+(:\d+)?$/i.test(host) ? `${proto}://${host}` : `http://localhost:${PORT}`;
+}
+const escAttr = (s) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json",
   ".webmanifest": "application/manifest+json",
@@ -247,11 +259,12 @@ const server = http.createServer(async (req, res) => {
     let filePath = path.normalize(path.join(PUBLIC_DIR, decodeURIComponent(url.pathname)));
     if (!filePath.startsWith(PUBLIC_DIR)) return sendJson(res, 403, { error: "forbidden" });
     if (url.pathname.endsWith("/")) filePath = path.join(filePath, "index.html");
-    const data = await fs.readFile(filePath).catch(() => null);
+    let data = await fs.readFile(filePath).catch(() => null);
     if (!data) {
       res.writeHead(404);
       return res.end("Not found");
     }
+    if (filePath === path.join(PUBLIC_DIR, "index.html")) data = data.toString("utf8").replaceAll("__ORIGIN__", escAttr(siteOrigin(req)));
     res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
     res.end(data);
   } catch (err) {

@@ -209,7 +209,7 @@ h3 { font-size: 17px; margin: 0; }
 .toast {
   position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px);
   background: #2b2118; color: #fff; padding: 10px 16px; border-radius: 99px; font-size: 14px;
-  opacity: 0; pointer-events: none; transition: .25s; z-index: 10; max-width: calc(100% - 32px); text-align: center;
+  opacity: 0; pointer-events: none; transition: .25s; z-index: 30; max-width: calc(100% - 32px); text-align: center;
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
@@ -284,3 +284,36 @@ h3 { font-size: 17px; margin: 0; }
 .end-fixes .mini { text-align: left; color: var(--text); font-size: 14px; padding: 6px 12px; }
 .end-actions { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
 .end-actions .btn { flex: 1; min-width: 110px; }
+
+/* 공유 */
+.share-card { display: flex; flex-direction: column; gap: 10px; }
+.share-card p { margin: 0; }
+.share-card .btn { white-space: nowrap; }
+.sheet-open, .sheet-open body { overflow: hidden; }
+.sheet-wrap { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+.sheet-backdrop { position: absolute; inset: 0; background: rgba(20, 12, 4, .45); animation: fade .2s; }
+.sheet {
+  position: relative; width: 100%; max-width: 520px; max-height: calc(100dvh - 24px); overflow-y: auto;
+  background: var(--card); border-radius: 22px 22px 0 0;
+  padding: 22px 18px calc(16px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: 12px;
+  animation: sheet-up .25s ease-out;
+}
+.sheet h3 { font-size: 19px; text-align: center; }
+.share-preview { background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; font-size: 15px; }
+.share-preview p { margin: 0; }
+.share-text { white-space: pre-line; }
+.share-url { color: var(--blue); word-break: break-all; user-select: all; -webkit-user-select: all; }
+.share-text + .share-url { margin-top: 4px; }
+.sheet-actions { display: flex; flex-direction: column; gap: 8px; }
+.sheet-hint { margin: -4px 0 0; text-align: center; }
+.share-qr { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.share-qr p { margin: 0; }
+.qr-box { width: 168px; height: 168px; background: #fff; border-radius: 12px; padding: 6px; }
+.qr-box svg { display: block; width: 100%; height: 100%; }
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes fade { from { opacity: 0; } }
+@media (min-width: 560px) {
+  .sheet-wrap { align-items: center; }
+  .sheet { border-radius: 22px; }
+}
