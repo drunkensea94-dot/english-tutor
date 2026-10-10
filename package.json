@@ -1,0 +1,14 @@
+{
+  "name": "ai-english-tutor",
+  "version": "1.0.0",
+  "description": "초보자를 위한 AI 영어 튜터 (말하기 + 대화 연습, 웹/휴대폰 PWA)",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0"
+  }
+}

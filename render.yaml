@@ -1,0 +1,14 @@
+# Render 배포 설정 (Blueprint). Render 대시보드 → New → Blueprint 에서 이 저장소를 고르면 자동으로 만들어져요.
+services:
+  - type: web
+    name: sunny-english-tutor
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/status
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false   # 배포할 때 Render 화면에서 직접 입력 (저장소에는 넣지 않아요)
+      - key: NODE_VERSION
+        value: "22"
